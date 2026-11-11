@@ -1,6 +1,7 @@
 import { SyncPlayer, SPEEDS } from './player.js';
 import { runSeparation, separationLimitMessage, STEMS, STEM_NOTES } from './separator.js';
 import { encodeWav } from './wav.js';
+import { evictStemCaches, waitForDuration } from './library.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -168,19 +169,9 @@ function decodeAudio(arrayBuffer) {
 const isMobile = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
 // Separated stems stay cached on their 音乐台 entry so re-opening a file is
-// instant. Each 3 minute song holds about 250 MB of WAV blobs, so only the most
-// recently used few are kept.
-const STEM_CACHE_LIMIT = 3;
+// instant. Only the most recently used few are kept (see STEM_CACHE_LIMITS),
+// and older ones are dropped before a new separation starts.
 let useCounter = 0;
-function evictStemCaches() {
-  const cached = state.entries
-    .filter((e) => e.cache && e !== state.current)
-    .sort((a, b) => b.lastUsed - a.lastUsed);
-  for (const e of cached.slice(STEM_CACHE_LIMIT - 1)) {
-    for (const u of Object.values(e.cache.urls)) URL.revokeObjectURL(u);
-    e.cache = null;
-  }
-}
 
 async function openEntry(entry) {
   if (state.abort) state.abort.abort();
@@ -221,6 +212,14 @@ async function openEntry(entry) {
   try {
     const sizeMessage = separationLimitMessage({ bytes: entry.file.size, mobile });
     if (sizeMessage) throw new Error(sizeMessage);
+    // The media element usually knows the duration within milliseconds, so a
+    // long file is refused before it is read and decoded. Containers that
+    // report no duration fall through to the check after decoding.
+    const metaDuration = await waitForDuration(player.master, { signal: abort.signal });
+    if (!stillCurrent()) return;
+    const metaMessage = separationLimitMessage({ duration: metaDuration || null, mobile });
+    if (metaMessage) throw new Error(metaMessage);
+    evictStemCaches(state.entries, entry, { mobile, revoke: (u) => URL.revokeObjectURL(u) });
     const buf = await entry.file.arrayBuffer();
     if (!stillCurrent()) return;
     let audioBuffer;
@@ -257,7 +256,6 @@ async function openEntry(entry) {
     player.setStems(urls);
     state.analysis.bpm = bpm;
     entry.cache = { urls, analysis: state.analysis };
-    evictStemCaches();
     state.stemsReady = true;
     state.separating = false;
     state.progress = 1;
