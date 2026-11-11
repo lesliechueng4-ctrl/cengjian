@@ -1,0 +1,578 @@
+{
+  "pbtResults": {
+    "6.2 编写开关设置默认值属性测试（修改 `tests/visualizer.test.mjs` 的 Property 16 用例）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405338624
+    },
+    "2.2 编写 Band 光栅化属性测试（`tests/vis-raster.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405397113
+    },
+    "2.3 编写 Band 与 wave 等价属性测试（追加到 `tests/vis-raster.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405398311
+    },
+    "2.4 编写含 Band 的光栅化顺序无关与单调属性测试（修改 `tests/vis-raster.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405399465
+    },
+    "4.2 编写布局参数校验属性测试（修改 `tests/vis-export-props.test.mjs` 的 Property 19 用例）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405776897
+    },
+    "4.3 编写叠放渲染计划属性测试（修改 `tests/vis-export-props.test.mjs` 的 Property 22 用例）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405778266
+    },
+    "4.4 编写叠放合成参数属性测试（修改 `tests/vis-export-props.test.mjs` 的 Property 23 用例）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794405779722
+    }
+  },
+  "executionHistory": {
+    "1.1 新建 `public/js/vis-lanes.js`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267395
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405280491
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405535373
+      }
+    ],
+    "2.1 在 `public/js/vis-raster.js` 中加入 `band`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267440
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405280618
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405535778
+      }
+    ],
+    "2.5 在 `public/js/vis-canvas.js` 中加入 `band`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267493
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405281085
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405537431
+      }
+    ],
+    "3. Checkpoint - 确保纯函数和两个后端的测试全部通过": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267531
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406207483
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406490027
+      }
+    ],
+    "4.1 修改 `export-service.js`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267570
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405560921
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406127970
+      }
+    ],
+    "5. Checkpoint - 确保 Server 端测试全部通过": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267608
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406208395
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406490198
+      }
+    ],
+    "6.1 修改 `public/js/visualizer.js` 的 `readVisSettings`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267656
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405282282
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405538585
+      }
+    ],
+    "6.3 修改 `public/js/vis-record.js` 和 `public/js/export-client.js`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267693
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405562127
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406128170
+      }
+    ],
+    "7.1 修改 `public/index.html` 和 `public/css/style.css`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267727
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405283124
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405540206
+      }
+    ],
+    "7.2 在 `public/js/app.js` 中接入 Lane_Strip 显示": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267762
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405563746
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406128306
+      }
+    ],
+    "7.3 在 `public/js/app.js` 中把视频文件的 Vis_Export 改为 `layout: 'stacked'`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267799
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406143051
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406157964
+      }
+    ],
+    "7.5 确保 `tests/app.test.mjs` 和 `tests/export-app.test.mjs` 不改即可通过": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267837
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406182922
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406199670
+      }
+    ],
+    "8.1 更新 `README.md`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267876
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406206290
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406490630
+      }
+    ],
+    "9. Final checkpoint - 确保全部测试通过": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405267911
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406542097
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406749462
+      }
+    ],
+    "1. 跑道纯函数模块": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405535442
+      }
+    ],
+    "2. Band 图元": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405537471
+      }
+    ],
+    "2.2 编写 Band 光栅化属性测试（`tests/vis-raster.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405541778
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405554124
+      }
+    ],
+    "2.3 编写 Band 与 wave 等价属性测试（追加到 `tests/vis-raster.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405543384
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405555718
+      }
+    ],
+    "2.4 编写含 Band 的光栅化顺序无关与单调属性测试（修改 `tests/vis-raster.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405544981
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405556916
+      }
+    ],
+    "2.6 编写 Canvas_Backend 的 Band 示例测试（修改 `tests/vis-canvas.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405546586
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405558246
+      }
+    ],
+    "6.2 编写开关设置默认值属性测试（修改 `tests/visualizer.test.mjs` 的 Property 16 用例）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405548092
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405559716
+      }
+    ],
+    "1.2 编写 Lane 场景确定性属性测试（`tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405564992
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406128434
+      }
+    ],
+    "1.4 编写 Lane 布局属性测试（`tests/vis-lanes-layout.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794405566116
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406129258
+      }
+    ],
+    "4. Server 端叠放导出": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406128026
+      }
+    ],
+    "6. 浏览器端设置与录制合成": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406128201
+      }
+    ],
+    "1.3 编写 Lane 输出界限属性测试（追加到 `tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406143427
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406159471
+      }
+    ],
+    "1.5 编写 Lane_Label 门限属性测试（追加到 `tests/vis-lanes-layout.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406144621
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406160714
+      }
+    ],
+    "4.2 编写布局参数校验属性测试（修改 `tests/vis-export-props.test.mjs` 的 Property 19 用例）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406145888
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406161920
+      }
+    ],
+    "4.5 更新 `tests/vis-export-service.test.mjs` 集成测试": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406147037
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406163107
+      }
+    ],
+    "4.6 在 `tests/vis-perf.test.mjs` 中加入跑道性能测试": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406148220
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406163964
+      }
+    ],
+    "6.4 更新 `tests/vis-export-client.test.mjs`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406149156
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406164964
+      }
+    ],
+    "1.6 编写时间窗口映射与 Onset_Marker 属性测试（追加到 `tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406172450
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406189283
+      }
+    ],
+    "1.7 编写波形采样属性测试（追加到 `tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406173659
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406190483
+      }
+    ],
+    "1.8 编写颜色与透明度模型属性测试（追加到 `tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406174834
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406191689
+      }
+    ],
+    "1.9 编写 Playhead 与闪光属性测试（追加到 `tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406176058
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406192882
+      }
+    ],
+    "1.10 编写减少动态效果属性测试（追加到 `tests/vis-lanes.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406177278
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406193740
+      }
+    ],
+    "1.11 编写叠放尺寸属性测试（追加到 `tests/vis-lanes-layout.test.mjs`）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406178444
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406194891
+      }
+    ],
+    "4.3 编写叠放渲染计划属性测试（修改 `tests/vis-export-props.test.mjs` 的 Property 22 用例）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406179638
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406196484
+      }
+    ],
+    "4.4 编写叠放合成参数属性测试（修改 `tests/vis-export-props.test.mjs` 的 Property 23 用例）": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406180895
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406197698
+      }
+    ],
+    "7.4 更新 `tests/vis-app.test.mjs`": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406182533
+      },
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406198535
+      }
+    ],
+    "7. 练习室界面接入": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406199707
+      }
+    ],
+    "8. 文档": [
+      {
+        "executionId": "f1a25975-e98b-4238-a7b8-2a2663cfa8ee",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794406490673
+      }
+    ]
+  }
+}

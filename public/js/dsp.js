@@ -546,3 +546,368 @@ export function estimateBpm(samples, sampleRate, opts = {}) {
   if (Math.abs(denom) > 1e-12) lag = best + (0.5 * (a - c)) / denom;
   return Math.round(((60 * frameRate) / lag) * 10) / 10;
 }
+// ---------------------------------------------------------------------------
+// Separation helpers (atomic mask partition, design 6.2 / 6.8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scale all channels together by 0.98 / peak when their joint peak exceeds 1.
+ * Returns the input array unchanged otherwise. Never mutates the inputs; a
+ * channel array that appears more than once (e.g. fx = [s, s]) is scaled once
+ * and shared in the output the same way.
+ */
+export function limitPeak(channels) {
+  let peak = 0;
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) { const a = Math.abs(ch[i]); if (a > peak) peak = a; }
+  }
+  if (!(peak > 1)) return channels;
+  const g = 0.98 / peak;
+  const done = new Map();
+  return channels.map((ch) => {
+    if (done.has(ch)) return done.get(ch);
+    const out = new Float32Array(ch.length);
+    for (let i = 0; i < ch.length; i++) out[i] = ch[i] * g;
+    done.set(ch, out);
+    return out;
+  });
+}
+
+/**
+ * Phase-aware center / side masks. With psi = 2·Re(L·conj(R)) / (|L|² + |R|²):
+ *   C = max(0, psi)^sharpness   (in phase 1, anti-phase 0, one side only 0)
+ *   S = 1 − max(0, psi)
+ * When smoothFrames > 0 the cross and auto spectra are averaged over ±N frames
+ * (per bin) before the ratio is taken. Silent bins get C = 0, S = 1.
+ */
+export function centerMaskPhase(specL, specR, sharpness = 4, smoothFrames = 0) {
+  const size = specL.re.length;
+  const bins = specL.bins ?? size;
+  const frames = specL.frames ?? Math.floor(size / bins);
+  const C = new Float32Array(size);
+  const S = new Float32Array(size);
+  const lre = specL.re, lim = specL.im, rre = specR.re, rim = specR.im;
+  const N = Math.max(0, Math.floor(smoothFrames));
+  const finish = (i, cross, pow) => {
+    let psi = pow > 1e-12 ? (2 * cross) / pow : 0;
+    if (psi < 0) psi = 0; else if (psi > 1) psi = 1;
+    C[i] = Math.pow(psi, sharpness);
+    S[i] = 1 - psi;
+  };
+  if (N === 0) {
+    for (let i = 0; i < size; i++) {
+      const lr = lre[i], li = lim[i], rr = rre[i], ri = rim[i];
+      finish(i, lr * rr + li * ri, lr * lr + li * li + rr * rr + ri * ri);
+    }
+    return { C, S };
+  }
+  const cross = new Float64Array(frames);
+  const pow = new Float64Array(frames);
+  for (let b = 0; b < bins; b++) {
+    for (let t = 0; t < frames; t++) {
+      const i = t * bins + b;
+      const lr = lre[i], li = lim[i], rr = rre[i], ri = rim[i];
+      cross[t] = lr * rr + li * ri;
+      pow[t] = lr * lr + li * li + rr * rr + ri * ri;
+    }
+    // sliding sum over [t − N, t + N]
+    let sc = 0, sp = 0;
+    for (let t = 0; t <= Math.min(N, frames - 1); t++) { sc += cross[t]; sp += pow[t]; }
+    for (let t = 0; t < frames; t++) {
+      finish(t * bins + b, sc, sp);
+      const add = t + N + 1, drop = t - N;
+      if (add < frames) { sc += cross[add]; sp += pow[add]; }
+      if (drop >= 0) { sc -= cross[drop]; sp -= pow[drop]; }
+    }
+  }
+  return { C, S };
+}
+
+/** hi(f, f0) for one frequency: cos² ramp on log2 f from f0·2^(−1/6) (0) to f0·2^(1/6) (1). */
+function rampHi(f, f0) {
+  if (!(f > 0) || !(f0 > 0)) return f0 > 0 ? 0 : 1;
+  const x = Math.log2(f / f0);
+  if (x <= -1 / 6) return 0;
+  if (x >= 1 / 6) return 1;
+  const c = Math.cos((Math.PI / 2) * (x + 1 / 6) * 3); // 1 → 0 across the ramp
+  return 1 - c * c;
+}
+
+/**
+ * Frequency ramp of length `bins` (bin k at k·binHz). rising = true gives
+ * hi(f, f0) (0 below f0·2^(−1/6), 1 above f0·2^(1/6), cos² in between on a
+ * log2 axis); rising = false gives lo(f, f0) = 1 − hi(f, f0).
+ */
+export function freqRamp(bins, binHz, f0, rising = true) {
+  const out = new Float32Array(bins);
+  for (let k = 0; k < bins; k++) {
+    const h = rampHi(k * binHz, f0);
+    out[k] = rising ? h : 1 - h;
+  }
+  return out;
+}
+
+
+/**
+ * Combine HPSS soft masks with frequency / spatial weights into atomic masks
+ * (design 6.2). All masks are laid out as [frame * bins + bin].
+ *
+ * groups:
+ *   frames, bins, binHz         layout and bin spacing (Hz)
+ *   Mh, Mp, Mr                  harmonic / percussive / residual soft masks.
+ *                               Any may be omitted (treated as 0, Mr defaults to
+ *                               max(0, 1 − Mh − Mp)); the three are normalised to
+ *                               sum to 1 per point (all ~0 → Mr = 1).
+ *   band   Float32Array(bins)   vocal band weight; omitted → no V atom weight
+ *   Cv     number | Float32Array(size)  vocal center cue (default 1)
+ *   fc     number | Float32Array(frames) bass crossover in Hz (default 250)
+ *   S      Float32Array(size)   side-ness from centerMaskPhase; null = mono
+ *   fxHz = 1500, percHz = 5000, monoFxHz = 6000
+ *   renormalize = true          when true, non-V atoms are returned as
+ *                               M'_j = M_j / Σ_{k≠V} M_k (to be applied to
+ *                               Y_c = X_c − V); denominator < 1e-9 → M'_O = 1
+ *                               (or M'_Rem = 1 without an O atom).
+ *
+ * Atoms returned: V, B, H when Mh is given; D, T, F, O when Mp or Mr is given;
+ * with Mh given and neither Mp nor Mr, the non-harmonic part is a single atom
+ * Rem = 1 − Mh (High_Quality_Mode stage 1). With renormalize = false all
+ * returned masks are non-negative and sum to 1 per point; with renormalize =
+ * true the non-V atoms sum to 1 per point and V is unchanged.
+ */
+export function partitionMasks(groups) {
+  const { frames, bins, binHz } = groups;
+  const size = frames * bins;
+  const { Mh, Mp, band, Cv, fc, S } = groups;
+  const MrIn = groups.Mr;
+  const mono = !S;
+  const fxHz = groups.fxHz ?? 1500;
+  const percHz = groups.percHz ?? 5000;
+  const monoFxHz = groups.monoFxHz ?? 6000;
+  const renormalize = groups.renormalize !== false;
+  const harmonic = !!Mh;
+  const restOnly = harmonic && !Mp && !MrIn;
+  const split = !restOnly;
+
+  const hiFx = freqRamp(bins, binHz, fxHz, true);
+  const hiPerc = freqRamp(bins, binHz, percHz, true);
+  const hiMonoFx = freqRamp(bins, binHz, monoFxHz, true);
+  const fcScalar = fc == null || typeof fc === 'number';
+  const loBass = fcScalar ? freqRamp(bins, binHz, fc ?? 250, false) : new Float32Array(bins);
+
+  const out = {};
+  if (harmonic) { out.V = new Float32Array(size); out.B = new Float32Array(size); out.H = new Float32Array(size); }
+  if (split) {
+    out.D = new Float32Array(size); out.T = new Float32Array(size);
+    out.F = new Float32Array(size); out.O = new Float32Array(size);
+  } else {
+    out.Rem = new Float32Array(size);
+  }
+
+  const oV = out.V, oB = out.B, oH = out.H, oD = out.D, oT = out.T, oF = out.F, oO = out.O, oRem = out.Rem;
+  // Cv (number or per-point array, default 1) resolved once so the hot loop
+  // stays monomorphic; a per-point helper call here cost ~5× the whole loop.
+  const cvArr = Cv != null && typeof Cv !== 'number' ? Cv : null;
+  const cvNum = typeof Cv === 'number' ? Cv : 1;
+  for (let t = 0; t < frames; t++) {
+    if (!fcScalar) {
+      const f0 = fc[t];
+      for (let k = 0; k < bins; k++) loBass[k] = 1 - rampHi(k * binHz, f0);
+    }
+    for (let k = 0; k < bins; k++) {
+      const i = t * bins + k;
+      let h = Mh ? Math.max(0, Mh[i]) : 0;
+      let p = Mp ? Math.max(0, Mp[i]) : 0;
+      let r = MrIn ? Math.max(0, MrIn[i]) : Math.max(0, 1 - h - p);
+      const tot = h + p + r;
+      if (tot > 1e-12) { h /= tot; p /= tot; r /= tot; } else { h = 0; p = 0; r = 1; }
+
+      if (harmonic) {
+        let wv = band ? band[k] * (cvArr ? cvArr[i] : cvNum) : 0;
+        if (!(wv > 0)) wv = 0; else if (wv > 1) wv = 1;
+        const wb = (1 - wv) * loBass[k];
+        const wh = Math.max(0, 1 - wv - wb);
+        oV[i] = h * wv;
+        oB[i] = h * wb;
+        oH[i] = h * wh;
+      }
+      if (split) {
+        let sideW = 0;
+        if (!mono) { const s = Math.min(1, Math.max(0, S[i])); sideW = s * s; }
+        const wfP = mono ? 0 : sideW * hiFx[k];
+        const wt = (1 - wfP) * hiPerc[k];
+        const wd = Math.max(0, 1 - wfP - wt);
+        const wfR = mono ? hiMonoFx[k] : sideW * hiFx[k];
+        oD[i] = p * wd;
+        oT[i] = p * wt;
+        oF[i] = p * wfP + r * wfR;
+        oO[i] = r * (1 - wfR);
+      } else {
+        oRem[i] = p + r;
+      }
+
+      if (renormalize) {
+        if (harmonic) {
+          // Σ_{k≠V} M_k computed explicitly to avoid drift
+          let d = oB[i] + oH[i];
+          d += split ? oD[i] + oT[i] + oF[i] + oO[i] : oRem[i];
+          if (d < 1e-9) {
+            oB[i] = 0; oH[i] = 0;
+            if (split) { oD[i] = 0; oT[i] = 0; oF[i] = 0; oO[i] = 1; } else oRem[i] = 1;
+          } else {
+            const g = 1 / d;
+            oB[i] *= g; oH[i] *= g;
+            if (split) { oD[i] *= g; oT[i] *= g; oF[i] *= g; oO[i] *= g; } else oRem[i] *= g;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Default coefficients for bassCrossover (design 6.3); tuned on the Benchmark_Set. */
+export const BASS_CROSSOVER_DEFAULTS = Object.freeze({
+  factor: 2.2,
+  min: 150,
+  max: 320,
+  fallback: 250,
+  radius: 8,
+  loHz: 30,
+  hiHz: 300,
+  minEnergy: 1e-10,
+});
+
+/**
+ * Adaptive per-frame bass crossover (design 6.3):
+ *   E_t(k) = Σ_{|τ|≤radius} Mh(t+τ,k)·magAvg(t+τ,k)²   for f_k ∈ [loHz, hiHz]
+ *   f̄_t = Σ f_k·E_t(k) / Σ E_t(k),  fc_t = clamp(factor·f̄_t, min, max)
+ * Σ E_t < minEnergy gives fc_t = fallback. Mh may be null (treated as 1).
+ * Each frame depends only on ±radius frames. Returns Float32Array(frames) in Hz.
+ */
+export function bassCrossover(Mh, magAvg, frames, bins, binHz, opts = {}) {
+  const o = { ...BASS_CROSSOVER_DEFAULTS, ...opts };
+  const R = Math.max(0, Math.floor(o.radius));
+  const k0 = Math.max(0, Math.ceil(o.loHz / binHz));
+  const k1 = Math.min(bins - 1, Math.floor(o.hiHz / binHz));
+  // per-frame weighted sums; the windowed sums are then sliding sums over frames
+  const num = new Float64Array(frames);
+  const den = new Float64Array(frames);
+  for (let t = 0; t < frames; t++) {
+    let a = 0, d = 0;
+    for (let k = k0; k <= k1; k++) {
+      const i = t * bins + k;
+      const m = magAvg[i];
+      const e = (Mh ? Math.max(0, Mh[i]) : 1) * m * m;
+      a += k * binHz * e;
+      d += e;
+    }
+    num[t] = a; den[t] = d;
+  }
+  const fc = new Float32Array(frames);
+  for (let t = 0; t < frames; t++) {
+    // direct window sum (no running sum) so the result is exact and order-independent
+    let a = 0, d = 0;
+    const lo = Math.max(0, t - R), hi = Math.min(frames - 1, t + R);
+    for (let u = lo; u <= hi; u++) { a += num[u]; d += den[u]; }
+    if (!(d >= o.minEnergy)) { fc[t] = o.fallback; continue; }
+    const f = o.factor * (a / d);
+    fc[t] = f < o.min ? o.min : f > o.max ? o.max : f;
+  }
+  return fc;
+}
+
+/**
+ * Long time median: per bin, take every `step`-th frame (frames t ≡ 0 mod step),
+ * run a k-point median along that decimated axis (zero padded, k forced odd),
+ * then linearly interpolate back to every frame (frames past the last grid
+ * point hold its value). Output frame t depends on frames within
+ * ±((k >> 1) + 1)·step. For segment independence the segment origin must lie
+ * on the same step grid (processSegments origins are hop-aligned; with
+ * step = 2 and even contextFrames + n/hop the grid matches).
+ */
+export function decimatedTimeMedian(mag, frames, bins, k, step = 2) {
+  const s = Math.max(1, Math.floor(step));
+  let kk = Math.max(1, Math.floor(k));
+  if (kk % 2 === 0) kk += 1;
+  const out = new Float32Array(frames * bins);
+  if (frames === 0 || bins === 0) return out;
+  const D = Math.ceil(frames / s);
+  const sub = new Float32Array(D);
+  const med = new Float32Array(D);
+  for (let b = 0; b < bins; b++) {
+    for (let g = 0; g < D; g++) sub[g] = mag[g * s * bins + b];
+    medianFilter(sub, kk, med);
+    for (let g = 0; g < D; g++) {
+      const t0 = g * s;
+      const v0 = med[g];
+      if (g + 1 < D) {
+        const v1 = med[g + 1];
+        for (let j = 0; j < s; j++) out[(t0 + j) * bins + b] = v0 + (v1 - v0) * (j / s);
+      } else {
+        for (let t = t0; t < frames; t++) out[t * bins + b] = v0;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * One Wiener refinement pass (design 6.5). For each atom j:
+ *   v_j = box3×3( Σ_c |M_j·X_c|² )   (mean over ±1 frame, ±1 bin, edges use
+ *                                    the available neighbours)
+ *   M_j ← v_j / Σ_k v_k
+ * Where Σ_k v_k is ~0 the original masks are kept, so masks that summed to 1
+ * still sum to 1. `masks` is an object or array of Float32Array atom masks,
+ * updated in place (and returned); `specs` is an array of channel spectra
+ * { re, im } that the atoms apply to (X_c or Y_c = X_c − V).
+ */
+export function wienerRefine(masks, specs, frames, bins) {
+  const list = Array.isArray(masks) ? masks : Object.values(masks);
+  const size = frames * bins;
+  if (list.length === 0 || size === 0) return masks;
+  // channel power P = Σ_c |X_c|²
+  const P = new Float32Array(size);
+  for (const sp of specs) {
+    const re = sp.re, im = sp.im;
+    for (let i = 0; i < size; i++) P[i] += re[i] * re[i] + im[i] * im[i];
+  }
+  const tmp = new Float32Array(size);
+  const powers = list.map((M) => {
+    // frequency pass: tmp = Σ_{|δk|≤1} M²·P
+    for (let t = 0; t < frames; t++) {
+      const r = t * bins;
+      for (let k = 0; k < bins; k++) {
+        let acc = 0;
+        for (let d = -1; d <= 1; d++) {
+          const kk = k + d;
+          if (kk < 0 || kk >= bins) continue;
+          const m = M[r + kk];
+          acc += m * m * P[r + kk];
+        }
+        tmp[r + k] = acc;
+      }
+    }
+    // time pass
+    const v = new Float32Array(size);
+    for (let t = 0; t < frames; t++) {
+      const t0 = Math.max(0, t - 1), t1 = Math.min(frames - 1, t + 1);
+      const r = t * bins;
+      for (let k = 0; k < bins; k++) {
+        let acc = 0;
+        for (let u = t0; u <= t1; u++) acc += tmp[u * bins + k];
+        v[r + k] = acc;
+      }
+    }
+    return v;
+  });
+  // The box mean's divisor is common to all atoms at a point, so plain sums give the same ratio.
+  const J = list.length;
+  for (let i = 0; i < size; i++) {
+    let sum = 0;
+    for (let j = 0; j < J; j++) sum += powers[j][i];
+    if (!(sum > 1e-30)) continue;
+    const g = 1 / sum;
+    for (let j = 0; j < J; j++) list[j][i] = powers[j][i] * g;
+  }
+  return masks;
+}

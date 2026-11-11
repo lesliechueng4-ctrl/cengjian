@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createDemucsService, readConfig, defaultTempRoot } from './demucs-service.js';
+import { createExportService, readExportConfig, defaultExportTempRoot } from './export-service.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 
@@ -39,13 +41,20 @@ export function resolvePath(rawUrl, root = ROOT) {
   if (decoded.split(/[\\/]+/).includes('..')) return { status: 403 };
   let rel = decoded.replace(/^[\\/]+/, '');
   if (rel === '' || rel.endsWith('/')) rel += 'index.html';
-  const file = path.resolve(root, rel);
-  if (file !== root && !file.startsWith(root + path.sep)) return { status: 403 };
+  // Normalise the root too, so the containment check compares like with like
+  // (e.g. a POSIX-style root on Windows resolves to a drive-qualified path).
+  const base = path.resolve(root);
+  const file = path.resolve(base, rel);
+  if (file !== base && !file.startsWith(base + path.sep)) return { status: 403 };
   return { file };
 }
 
-export function createServer(root = ROOT) {
+export function createServer(root = ROOT, { demucs, exporter } = {}) {
   return http.createServer((req, res) => {
+    // Demucs_Service only claims /api/separate and Export_Service only /api/export;
+    // everything else is static.
+    if (demucs && demucs.handle(req, res)) return;
+    if (exporter && exporter.handle(req, res)) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       send(res, 405, 'Method Not Allowed', { Allow: 'GET, HEAD' });
       return;
@@ -91,9 +100,15 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve
 if (isMain) {
   const port = Number(process.env.PORT) || 5173;
   const host = process.env.HOST || '0.0.0.0';
-  createServer().listen(port, host, () => {
+  const demucs = createDemucsService({ ...readConfig(), tempRoot: defaultTempRoot() });
+  const exporter = createExportService({ ...readExportConfig(), tempRoot: defaultExportTempRoot() });
+  createServer(ROOT, { demucs, exporter }).listen(port, host, () => {
     console.log('层间 · 音乐练习 已启动');
     console.log(`  电脑访问:  http://localhost:${port}`);
     for (const ip of lanAddresses()) console.log(`  手机访问:  http://${ip}:${port}  (同一 Wi-Fi 下)`);
+    // Clears the temp dir and probes Demucs; prints one "AI 分离" line after the banner.
+    demucs.init();
+    // Clears the cengjian-export temp dir and probes FFmpeg; prints one "视频导出" line.
+    exporter.init();
   });
 }

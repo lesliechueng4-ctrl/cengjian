@@ -129,6 +129,9 @@ body.dragging .app::after {
   overflow: hidden;
   background: #111;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  /* block-level child of .media-col (or a minmax(0, …) grid track on desktop),
+     so its width comes from the parent and inline-size containment is safe */
+  container-type: inline-size;
 }
 .stage { position: relative; background: #000; }
 .stage video { display: block; width: 100%; max-height: 60vh; background: #000; object-fit: contain; aspect-ratio: 16 / 9; }
@@ -165,6 +168,38 @@ body.dragging .app::after {
 .media-card.is-playing .bars i { animation-play-state: running; }
 @keyframes bounce { 0%, 100% { height: 20%; } 50% { height: 100%; } }
 .audio-name { margin: 0; padding: 0 16px; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* visualizer canvas: covers the stage, clicks pass through to #stageTap (6.1).
+   The global [hidden] rule (display: none !important) still wins over this. */
+.vis-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
+/* audio-only + vis on: canvas replaces the bars, file name stays visible on top (6.2) */
+.media-card.vis-on.audio-only .audio-art .bars { display: none; }
+.media-card.vis-on.audio-only .audio-art { justify-content: flex-end; padding-bottom: 12px; }
+.media-card.vis-on.audio-only .audio-name {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* stem lanes: a strip in normal flow between .stage and .controls, so it never
+   overlaps the video (1.3). 128px is the fallback for browsers without cqw.
+   The global [hidden] rule (display: none !important) still hides it. */
+.lane-strip { position: relative; height: 128px; height: clamp(112px, 20cqw, 160px); background: #0b0d14; }
+.lane-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.lane-labels { position: absolute; inset: 0; pointer-events: none; }
+.lane-label {
+  position: absolute;
+  left: 6px;
+  transform: translateY(-50%);
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(11, 13, 20, 0.6);
+  white-space: nowrap;
+  pointer-events: none;
+}
 
 .controls { background: #fff; padding: 8px 12px 6px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); }
 .progress { position: relative; height: 24px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
@@ -216,6 +251,23 @@ body.dragging .app::after {
   font-weight: 600;
   font-size: 14px;
 }
+.vis-toggle {
+  height: 32px;
+  padding: 0 10px;
+  margin-left: 4px;
+  border: 1px solid var(--accent-light);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.vis-toggle:hover:not(:disabled) { background: var(--accent-faint); }
+.vis-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.vis-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+.vis-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vis-hint { display: block; padding: 0 0 4px; font-size: 12px; color: #888; }
 
 /* ---------- stems ---------- */
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 20px 0 6px; }
@@ -239,6 +291,46 @@ body.dragging .app::after {
   border-radius: 2px;
   background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--accent-light) var(--p, 0%));
 }
+
+.stem-status-row { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 10px; }
+.stem-status-row .stem-status { flex: 1 1 auto; min-width: 0; margin: 0; }
+.cancel-btn {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-light);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cancel-btn:hover { background: var(--accent-faint); }
+
+/* ---------- export ---------- */
+.export-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; }
+.export-btn {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: 16px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.export-btn:hover:not(:disabled) { background: var(--accent-dark); border-color: var(--accent-dark); }
+.export-btn:disabled { opacity: 0.45; cursor: default; }
+.export-hint { flex: 1 1 140px; min-width: 0; font-size: 12px; color: var(--muted); }
+.export-status { flex: 1 1 100%; order: 1; margin: 0; font-size: 12px; line-height: 1.5; color: var(--accent-dark); overflow-wrap: anywhere; }
+.link-btn { flex: 0 0 auto; padding: 4px 0; border: 0; background: transparent; color: var(--accent); font-size: 12px; text-decoration: underline; white-space: nowrap; }
+.link-btn:hover { color: var(--accent-dark); }
+.export-options { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.export-options .btn-block { margin-top: 0; }
+.export-cancel { border-color: var(--line); color: var(--muted); }
 
 .stem-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .stem-btn {
@@ -317,6 +409,10 @@ body.dragging .app::after {
 .settings { padding: 4px 16px; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; min-height: 52px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .setting-row:last-child { border-bottom: 0; }
+.setting-row:has(+ .hint[hidden]) { border-bottom: 0; }
+.setting-row > span { flex: 0 0 auto; margin-right: 12px; }
+.setting-row select { min-width: 0; max-width: 62%; text-overflow: ellipsis; }
+.settings .hint { margin: 0; padding: 10px 0 12px; font-size: 13px; line-height: 1.5; color: var(--muted); }
 .setting-row select { font: inherit; padding: 6px 10px; border: 1px solid var(--accent-light); border-radius: 8px; background: #fff; color: var(--accent); }
 .switch { appearance: none; -webkit-appearance: none; width: 46px; height: 28px; border-radius: 14px; background: #ddd; position: relative; cursor: pointer; transition: background 0.2s; margin: 0; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }

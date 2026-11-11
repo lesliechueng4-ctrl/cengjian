@@ -80,10 +80,17 @@ globalThis.window = {
   matchMedia: () => ({ matches: mobile }),
   OfflineAudioContext,
 };
+const storage = new Map();
 Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
-  value: { getItem: () => null, setItem() {} },
+  value: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)) },
 });
+// The HTML starts with the hint hidden; app.js reveals it once the status check answers.
+{
+  const hint = new FakeEl('p');
+  hint.hidden = true;
+  elements.set('#demucsHint', hint);
+}
 globalThis.requestAnimationFrame = () => 1;
 console.error = () => {}; // app.js logs the expected "too long" error
 globalThis.Audio = class extends FakeEl { constructor() { super('audio'); } };
@@ -160,4 +167,216 @@ test('phones drop older stem caches before separating, and cached files reopen i
   openFromLibrary('a.wav');
   assert.ok(status().startsWith('正在分离音轨'));
   await waitFor(() => status().startsWith('音轨已就绪') && reads.filter((n) => n === 'a.wav').length === 2);
+});
+
+// ---------------------------------------------------------------------------
+// Demucs path and Quality_Mode. From here on `fetch` is a stub of the local
+// server and `Worker` a fake DSP worker: every runSeparation call shows up in
+// `workerRuns` with the mode it was given.
+// ---------------------------------------------------------------------------
+
+const { encodeWav } = await import('../public/js/wav.js');
+
+const workerRuns = [];
+const tinyWav = () => encodeWav([0, 1].map((c) => Float32Array.from({ length: 2048 }, (_, i) => Math.sin(i / (5 + c)) * 0.2)), 44100);
+// The Vis_Analyzer worker (vis-analysis.worker.js) says 'ready' but never
+// answers: Vis_Data stays pending, it is not counted in `workerRuns`, and
+// app.js's start timeout never falls back to the main thread mid-test.
+class FakeWorker {
+  constructor(url) {
+    this.vis = String(url).includes('vis-analysis.worker.js');
+    if (this.vis) setTimeout(() => { if (this.onmessage) this.onmessage({ data: { type: 'ready' } }); }, 0);
+  }
+  postMessage(data) {
+    if (this.vis) return;
+    workerRuns.push(data.mode);
+    setTimeout(() => {
+      this.onmessage({ data: { type: 'ready' } });
+      for (const s of STEMS) this.onmessage({ data: { type: 'stem', id: s.id, wav: tinyWav() } });
+      this.onmessage({ data: { type: 'done', bpm: 120, mode: data.mode } });
+    }, 0);
+  }
+  terminate() {}
+}
+
+const requests = []; // { method, url }
+let server = {}; // per-test behaviour of the fake local server
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+const AVAILABLE = { available: true, checking: false, models: ['htdemucs', 'htdemucs_6s'], maxUploadBytes: 1e9, queueLength: 0 };
+async function fakeFetch(url, init = {}) {
+  const method = init.method || 'GET';
+  requests.push({ method, url: String(url) });
+  if (url === '/api/separate/status') return server.status ? json(server.status) : json({ error: 'down' }, 500);
+  if (method === 'POST') return server.post();
+  if (method === 'DELETE') return new Response(null, { status: 204 });
+  if (/\.wav$/.test(url)) return new Response(tinyWav());
+  return server.poll();
+}
+const posts = () => requests.filter((r) => r.method === 'POST');
+const deletes = () => requests.filter((r) => r.method === 'DELETE');
+
+function textOf(node) {
+  return (node.textContent ?? '') + (node.children || []).map(textOf).join('');
+}
+const sheetText = () => textOf($('#sheetBody'));
+const derived = () => stemButtons.slice(1);
+
+test('Demucs: only 原曲 is playable while separating, then all 8 stems, and the sheet names the model', async () => {
+  globalThis.Worker = FakeWorker;
+  globalThis.fetch = fakeFetch;
+  mobile = false;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  server = {
+    status: AVAILABLE,
+    post: async () => { await gate; return json({ id: 'job-d' }, 202); },
+    poll: () => json({ status: 'done' }),
+  };
+  $('#analysisLink').click(); // keep the 真实分析 sheet open from here on
+  const runsBefore = workerRuns.length;
+
+  upload(makeFile('d.wav', 'audio/wav'));
+  await waitFor(() => status().includes('上传到本地服务器'));
+  assert.equal(stemButtons[0].disabled, false, '原曲 stays playable');
+  assert.ok(derived().every((b) => b.disabled), 'derived stems wait for separation');
+  assert.equal($('#cancelSeparation').hidden, false);
+  release();
+
+  await waitFor(() => status().startsWith('音轨已就绪'));
+  assert.equal(derived().length, 8);
+  assert.ok(stemButtons.every((b) => !b.disabled));
+  assert.equal(posts().length, 1);
+  assert.match(posts()[0].url, /^\/api\/separate\?model=htdemucs&ext=wav$/);
+  assert.equal(workerRuns.length, runsBefore, 'browser DSP not used');
+  assert.ok(sheetText().includes('Demucs AI（htdemucs）'), 'analysis.engine is demucs and the model is shown');
+  assert.equal($('#demucsHint').hidden, true, 'hint hidden while Demucs is available');
+  assert.ok(deletes().some((r) => r.url === '/api/separate/job-d'), 'server copy freed');
+});
+
+test('status unavailable shows the hint and runs DSP; reopening the Demucs file sends no POST', async () => {
+  mobile = false;
+  server = { status: null };
+  upload(makeFile('e.wav', 'audio/wav'));
+  await waitFor(() => status().startsWith('音轨已就绪') && reads.includes('e.wav'));
+  assert.equal($('#demucsHint').hidden, false);
+  assert.equal(posts().length, 1, 'no upload when Demucs is unavailable');
+
+  openFromLibrary('d.wav');
+  assert.ok(status().startsWith('音轨已就绪'));
+  assert.ok(stemButtons.every((b) => !b.disabled));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(posts().length, 1);
+  assert.ok(sheetText().includes('Demucs AI（htdemucs）'));
+});
+
+test('a failed upload (HTTP 500) falls back to browser separation with a notice', async () => {
+  mobile = false;
+  server = { status: AVAILABLE, post: () => json({ error: 'boom' }, 500) };
+  const runsBefore = workerRuns.length;
+  upload(makeFile('f.wav', 'audio/wav'));
+  await waitFor(() => status().startsWith('音轨已就绪') && reads.includes('f.wav'));
+  assert.ok(status().includes('浏览器分离'), status());
+  assert.equal(workerRuns.length, runsBefore + 1);
+  assert.ok(sheetText().includes('浏览器 DSP'));
+});
+
+test('取消分离 during a Demucs job sends DELETE and never starts DSP', async () => {
+  mobile = false;
+  server = {
+    status: AVAILABLE,
+    post: () => json({ id: 'job-g' }, 202),
+    poll: () => json({ status: 'running', progress: 10 }),
+  };
+  const runsBefore = workerRuns.length;
+  upload(makeFile('g.wav', 'audio/wav'));
+  await waitFor(() => status().includes('AI 分离中'));
+  assert.ok(derived().every((b) => b.disabled));
+  $('#cancelSeparation').click();
+  await waitFor(() => deletes().some((r) => r.url === '/api/separate/job-g'));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(status().includes('已取消'), status());
+  assert.equal($('#cancelSeparation').hidden, true);
+  assert.equal(workerRuns.length, runsBefore, 'runSeparation not called');
+  assert.equal(reads.includes('g.wav'), false);
+  assert.ok(derived().every((b) => b.disabled));
+});
+
+test('phones run DSP in fast mode and desktops in high quality mode', async () => {
+  server = { status: null };
+  mobile = true;
+  upload(makeFile('m.wav', 'audio/wav'));
+  await waitFor(() => status().startsWith('音轨已就绪') && reads.includes('m.wav'));
+  assert.equal(workerRuns.at(-1), 'fast');
+  assert.ok(sheetText().includes('浏览器 DSP（快速模式）'), sheetText());
+
+  mobile = false;
+  upload(makeFile('h.wav', 'audio/wav'));
+  await waitFor(() => status().startsWith('音轨已就绪') && reads.includes('h.wav'));
+  assert.equal(workerRuns.at(-1), 'high');
+  assert.ok(sheetText().includes('浏览器 DSP（高质量模式）'), sheetText());
+  assert.equal($('#demucsHint').hidden, false);
+});
+
+test('changing the Demucs model saves it to localStorage', () => {
+  const select = $('#demucsModel');
+  assert.equal(select.value, 'htdemucs');
+  select.value = 'htdemucs_6s';
+  select.dispatchEvent(new Event('change'));
+  assert.equal(JSON.parse(storage.get('cengjian.settings')).demucsModel, 'htdemucs_6s');
+  select.value = 'bogus';
+  select.dispatchEvent(new Event('change'));
+  assert.equal(select.value, 'htdemucs');
+  assert.equal(JSON.parse(storage.get('cengjian.settings')).demucsModel, 'htdemucs');
+});
+
+// loadSettings runs once at import and is not exported, so each run imports a
+// fresh app.js instance (unique query string) and reads the result back from
+// #demucsModel. Each run gets its own select element so earlier instances'
+// change listeners don't write to storage. Kept last: the leftover instances
+// stay wired to the other shared fake elements.
+// **Validates: Requirements 7.2, 7.3, 7.4**
+test('Feature: separation-accuracy, Property 13: 模型设置的保存往返与清洗', async () => {
+  const { forAll, gen } = await import('./helpers/prop.mjs');
+  const { sanitizeDemucsModel, DEMUCS_MODELS } = await import('../public/js/remote-separator.js');
+  server = { status: null }; // each import's status check answers right away
+  const KEY = 'cengjian.settings';
+  const modelGen = gen.oneOf(
+    gen.oneOf(...DEMUCS_MODELS),
+    gen.oneOf('HTDEMUCS', ' htdemucs', 'htdemucs_6S', 'mdx', ''),
+    gen.string({ maxLength: 8 }),
+    gen.int(-5, 5),
+    null, true, () => ['htdemucs'], () => ({ m: 'htdemucs' }),
+  );
+  const storedGen = gen.oneOf(
+    (rng) => JSON.stringify({ speed: 1, loop: false, demucsModel: modelGen(rng) }), // valid / bad model
+    (rng) => JSON.stringify({ speed: 1, loop: true }), // missing key
+    (rng) => JSON.stringify({ demucsModel: modelGen(rng) }).slice(0, -1 - gen.int(0, 5)(rng)), // corrupted
+    gen.oneOf('null', '42', '"htdemucs"', '[]', '["htdemucs_6s"]', 'true', '{', ''),
+    () => null, // nothing saved yet
+  );
+  const caseGen = (rng) => ({ stored: storedGen(rng), picked: modelGen(rng) });
+  const expectedFrom = (raw) => {
+    try {
+      const s = JSON.parse(raw || '{}');
+      return s !== null && typeof s === 'object' ? sanitizeDemucsModel(s.demucsModel) : 'htdemucs';
+    } catch { return 'htdemucs'; }
+  };
+
+  let n = 0;
+  await forAll(caseGen, async ({ stored, picked }) => {
+    if (stored === null) storage.delete(KEY); else storage.set(KEY, stored);
+    const select = new FakeEl('select');
+    elements.set('#demucsModel', select);
+    await import(`../public/js/app.js?property13=${n++}`);
+
+    const loaded = select.value;
+    assert.ok(DEMUCS_MODELS.includes(loaded), `loaded ${loaded}`);
+    assert.equal(loaded, expectedFrom(stored));
+
+    select.value = picked;
+    select.dispatchEvent(new Event('change'));
+    const saved = sanitizeDemucsModel(picked);
+    assert.equal(select.value, saved);
+    assert.equal(JSON.parse(storage.get(KEY)).demucsModel, saved);
+  }, { runs: 100 });
 });

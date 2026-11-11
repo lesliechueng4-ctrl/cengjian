@@ -246,3 +246,188 @@ test('separateChannels handles mono input', async () => {
   assert.equal(Object.keys(got).length, 8);
   for (const chs of Object.values(got)) assert.equal(chs.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// separation-accuracy helpers (Requirements 9.1, 9.2, 10.4)
+// ---------------------------------------------------------------------------
+
+import {
+  limitPeak, centerMaskPhase, freqRamp, partitionMasks, BASS_CROSSOVER_DEFAULTS,
+  bassCrossover, decimatedTimeMedian, wienerRefine,
+} from '../public/js/dsp.js';
+
+function rng(seed = 1) {
+  let s = seed >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+function randArray(n, rand, lo = 0, hi = 1) {
+  const a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = lo + (hi - lo) * rand();
+  return a;
+}
+
+function assertPartition(masks, keys, size, eps = 1e-5) {
+  for (let i = 0; i < size; i++) {
+    let sum = 0;
+    for (const k of keys) {
+      const v = masks[k][i];
+      assert.ok(v >= 0 && Number.isFinite(v), `${k}[${i}] = ${v} must be non-negative`);
+      sum += v;
+    }
+    assert.ok(Math.abs(sum - 1) < eps, `sum at ${i} = ${sum}`);
+  }
+}
+
+test('centerMaskPhase: L = R gives C = 1, S = 0; L = -R and R = 0 give C = 0, S = 1', () => {
+  const rand = rng(3);
+  const n = 64;
+  const re = randArray(n, rand, -1, 1);
+  const im = randArray(n, rand, -1, 1);
+  const L = { re, im };
+  const same = centerMaskPhase(L, { re, im });
+  const negRe = re.map((v) => -v), negIm = im.map((v) => -v);
+  const anti = centerMaskPhase(L, { re: negRe, im: negIm });
+  const zero = centerMaskPhase(L, { re: new Float32Array(n), im: new Float32Array(n) });
+  const silent = centerMaskPhase({ re: new Float32Array(n), im: new Float32Array(n) },
+    { re: new Float32Array(n), im: new Float32Array(n) });
+  for (let i = 0; i < n; i++) {
+    assert.ok(Math.abs(same.C[i] - 1) < 1e-5 && Math.abs(same.S[i]) < 1e-5);
+    assert.equal(anti.C[i], 0); assert.equal(anti.S[i], 1);
+    assert.equal(zero.C[i], 0); assert.equal(zero.S[i], 1);
+    assert.equal(silent.C[i], 0); assert.equal(silent.S[i], 1);
+  }
+  // smoothed variant keeps the same extremes
+  const frames = 8, bins = 8;
+  const sm = centerMaskPhase({ re, im, frames, bins }, { re, im, frames, bins }, 4, 2);
+  for (let i = 0; i < n; i++) assert.ok(Math.abs(sm.C[i] - 1) < 1e-5);
+});
+
+test('freqRamp: rising ramp goes 0 → 1 monotonically, falling ramp is its complement', () => {
+  const bins = 1025, binHz = SR / 2048, f0 = 1500;
+  const hi = freqRamp(bins, binHz, f0, true);
+  const lo = freqRamp(bins, binHz, f0, false);
+  assert.equal(hi[0], 0);
+  assert.equal(hi[bins - 1], 1);
+  assert.equal(lo[0], 1);
+  assert.equal(lo[bins - 1], 0);
+  for (let k = 1; k < bins; k++) {
+    assert.ok(hi[k] >= hi[k - 1], `not monotone at ${k}`);
+    assert.ok(Math.abs(hi[k] + lo[k] - 1) < 1e-6);
+  }
+  // 0 below f0·2^(-1/6), 1 above f0·2^(1/6)
+  for (let k = 0; k < bins; k++) {
+    const f = k * binHz;
+    if (f <= f0 * 2 ** (-1 / 6)) assert.equal(hi[k], 0);
+    if (f >= f0 * 2 ** (1 / 6)) assert.equal(hi[k], 1);
+  }
+});
+
+test('partitionMasks: masks are non-negative and sum to 1 per point', () => {
+  const rand = rng(7);
+  const frames = 6, bins = 129, binHz = SR / 256, size = frames * bins;
+  const Mh = randArray(size, rand), Mp = randArray(size, rand), Mr = randArray(size, rand);
+  const band = freqRamp(bins, binHz, 300, true);
+  const Cv = randArray(size, rand);
+  const S = randArray(size, rand);
+  const fc = randArray(frames, rand, 150, 320);
+  const all = ['V', 'B', 'H', 'D', 'T', 'F', 'O'];
+  const nonV = ['B', 'H', 'D', 'T', 'F', 'O'];
+
+  // renormalize: false, stereo and mono → all atoms partition unity
+  for (const side of [S, null]) {
+    const m = partitionMasks({ frames, bins, binHz, Mh, Mp, Mr, band, Cv, S: side, fc, renormalize: false });
+    assertPartition(m, all, size);
+  }
+  // renormalize: true → non-V atoms partition unity, V unchanged
+  const raw = partitionMasks({ frames, bins, binHz, Mh, Mp, Mr, band, Cv, S, fc, renormalize: false });
+  const re = partitionMasks({ frames, bins, binHz, Mh, Mp, Mr, band, Cv, S, fc });
+  assertPartition(re, nonV, size);
+  assert.deepEqual(re.V, raw.V);
+
+  // stage 1 (Mh only) → V, B, H, Rem
+  const s1 = partitionMasks({ frames, bins, binHz, Mh, band, Cv, fc: 250, renormalize: false });
+  assert.deepEqual(Object.keys(s1).sort(), ['B', 'H', 'Rem', 'V']);
+  assertPartition(s1, ['V', 'B', 'H', 'Rem'], size);
+  const s1r = partitionMasks({ frames, bins, binHz, Mh, band, Cv, fc: 250 });
+  assertPartition(s1r, ['B', 'H', 'Rem'], size);
+
+  // all-vocal point: denominator ~0 → O = 1
+  const one = new Float32Array(size).fill(1);
+  const zeros = new Float32Array(size);
+  const v = partitionMasks({ frames, bins, binHz, Mh: one, Mp: zeros, Mr: zeros, band: new Float32Array(bins).fill(1), Cv: 1 });
+  assertPartition(v, nonV, size);
+  for (let i = 0; i < size; i++) { assert.equal(v.V[i], 1); assert.equal(v.O[i], 1); }
+});
+
+test('wienerRefine: refined masks are non-negative and sum to 1 per point', () => {
+  const rand = rng(11);
+  const frames = 7, bins = 33, binHz = SR / 64, size = frames * bins;
+  const masks = partitionMasks({
+    frames, bins, binHz,
+    Mh: randArray(size, rand), Mp: randArray(size, rand), Mr: randArray(size, rand),
+    band: freqRamp(bins, binHz, 300, true), S: randArray(size, rand), renormalize: false,
+  });
+  const specs = [0, 1].map(() => ({ re: randArray(size, rand, -1, 1), im: randArray(size, rand, -1, 1) }));
+  // a silent region keeps the original (already normalised) masks
+  for (const sp of specs) for (let i = 0; i < bins; i++) { sp.re[i] = 0; sp.im[i] = 0; }
+  const out = wienerRefine(masks, specs, frames, bins);
+  assert.equal(out, masks);
+  assertPartition(out, Object.keys(out), size);
+});
+
+test('limitPeak: returns input when peak ≤ 1, scales jointly to 0.98 when peak > 1', () => {
+  const a = Float32Array.from([0.5, -1, 0.2]);
+  const b = Float32Array.from([0.1, 0.3, -0.9]);
+  const input = [a, b];
+  assert.equal(limitPeak(input), input);
+
+  const c = Float32Array.from([0.5, -2, 1]);
+  const d = Float32Array.from([1.5, 0.1, 0]);
+  const before = [Array.from(c), Array.from(d)];
+  const out = limitPeak([c, d, c]);
+  let peak = 0;
+  for (const ch of out) for (const v of ch) peak = Math.max(peak, Math.abs(v));
+  assert.ok(Math.abs(peak - 0.98) < 1e-6);
+  assert.ok(Math.abs(out[1][0] - 1.5 * 0.49) < 1e-6);
+  assert.equal(out[0], out[2]);
+  assert.deepEqual([Array.from(c), Array.from(d)], before); // inputs not mutated
+});
+
+test('bassCrossover: clamps to [min, max] and falls back on silence', () => {
+  const frames = 20, bins = 1025, binHz = SR / 2048, size = frames * bins;
+  const { min, max, fallback, factor } = BASS_CROSSOVER_DEFAULTS;
+  const tone = (k) => {
+    const m = new Float32Array(size);
+    for (let t = 0; t < frames; t++) m[t * bins + k] = 1;
+    return m;
+  };
+  const near = (fHz) => Math.round(fHz / binHz);
+  const low = bassCrossover(null, tone(near(40)), frames, bins, binHz);
+  const high = bassCrossover(null, tone(near(290)), frames, bins, binHz);
+  const kMid = near(100);
+  const midFc = bassCrossover(null, tone(kMid), frames, bins, binHz);
+  const silent = bassCrossover(null, new Float32Array(size), frames, bins, binHz);
+  const masked = bassCrossover(new Float32Array(size), tone(kMid), frames, bins, binHz);
+  for (let t = 0; t < frames; t++) {
+    assert.equal(low[t], min);
+    assert.equal(high[t], max);
+    assert.ok(Math.abs(midFc[t] - factor * kMid * binHz) < 1e-3);
+    assert.equal(silent[t], fallback);
+    assert.equal(masked[t], fallback);
+  }
+});
+
+test('decimatedTimeMedian: constant input gives constant output away from zero padding', () => {
+  const frames = 40, bins = 5, k = 5, step = 2;
+  const mag = new Float32Array(frames * bins).fill(0.7);
+  const out = decimatedTimeMedian(mag, frames, bins, k, step);
+  assert.equal(out.length, frames * bins);
+  const edge = ((k >> 1) + 1) * step;
+  for (let t = edge; t < frames - edge; t++) {
+    for (let b = 0; b < bins; b++) assert.ok(Math.abs(out[t * bins + b] - 0.7) < 1e-6);
+  }
+  // k = 1 is the identity on the grid, so a constant stays constant everywhere
+  const id = decimatedTimeMedian(mag, frames, bins, 1, step);
+  for (let i = 0; i < id.length; i++) assert.ok(Math.abs(id[i] - 0.7) < 1e-6);
+});

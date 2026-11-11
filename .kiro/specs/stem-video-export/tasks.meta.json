@@ -1,0 +1,487 @@
+{
+  "pbtResults": {
+    "1.2 编写 `tests/server-util.test.mjs`": {
+      "status": "passed",
+      "lastRunTimestamp": 1794394352102
+    },
+    "6.5 编写文件名和按钮状态的属性测试（`tests/export-client.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794394498755
+    },
+    "2.3 编写配置、分帧、参数和路径的属性测试（`tests/export-props.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794394936613
+    },
+    "6.6 编写 `runServerMux` 的属性与示例测试（追加到 `tests/export-client.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794394949020
+    },
+    "2.4 编写探测、合成参数和进度的属性测试（追加到 `tests/export-props.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794395294188
+    },
+    "6.7 编写路径选择和录制的属性与示例测试（追加到 `tests/export-client.test.mjs`）": {
+      "status": "passed",
+      "lastRunTimestamp": 1794395360231
+    }
+  },
+  "executionHistory": {
+    "1.1 新建 `server-util.js` 并让 `demucs-service.js` 改为导入": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689381
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393710545
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393923579
+      }
+    ],
+    "2.1 配置、路径、上传参数与分帧": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689413
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393944000
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394392661
+      }
+    ],
+    "2.2 探测解析、参数构建与进度解析": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689443
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394401533
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394654158
+      }
+    ],
+    "3.1 新建 `tests/fixtures/fake-ffmpeg.mjs`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689471
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393711705
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393923926
+      }
+    ],
+    "4.1 实现 `createExportService`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689500
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394817365
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395172671
+      }
+    ],
+    "4.2 在 `server.js` 中接入 Export_Service": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689529
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395179022
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395575396
+      }
+    ],
+    "5. Checkpoint - 确保 Server 端测试全部通过": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689560
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396038455
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396292162
+      }
+    ],
+    "6.1 文件名、按钮状态、文字、状态检测和下载": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689598
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393712842
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393924178
+      }
+    ],
+    "6.2 实现 `runServerMux` 和 `sourceExt`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689622
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393944506
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394392740
+      }
+    ],
+    "6.3 实现浏览器录制": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689644
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394401952
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394654959
+      }
+    ],
+    "6.4 实现 `exportVideoWithFallback`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689673
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394666659
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394809518
+      }
+    ],
+    "7.1 修改 `public/index.html` 和 `public/css/style.css`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689701
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393713701
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393924291
+      }
+    ],
+    "7.2 在 `public/js/app.js` 中实现导出流程": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689731
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395180235
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395576055
+      }
+    ],
+    "8.1 更新 `README.md`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689760
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395585477
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396034002
+      }
+    ],
+    "9. Final checkpoint - 确保全部测试通过": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393689790
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396295935
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396495130
+      }
+    ],
+    "1.2 编写 `tests/server-util.test.mjs`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393695180
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393945509
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394392808
+      }
+    ],
+    "2.3 编写配置、分帧、参数和路径的属性测试（`tests/export-props.test.mjs`）": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393696254
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394824485
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395173526
+      }
+    ],
+    "2.4 编写探测、合成参数和进度的属性测试（追加到 `tests/export-props.test.mjs`）": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393697454
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395181421
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395577185
+      }
+    ],
+    "4.3 编写 `tests/export-service.test.mjs` 集成测试": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393698655
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395586835
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396032260
+      }
+    ],
+    "4.4 在 `tests/server.test.mjs` 增加回归用例": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393699530
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395587891
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396032697
+      }
+    ],
+    "6.5 编写文件名和按钮状态的属性测试（`tests/export-client.test.mjs`）": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393700698
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394402927
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394655801
+      }
+    ],
+    "6.6 编写 `runServerMux` 的属性与示例测试（追加到 `tests/export-client.test.mjs`）": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393701898
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394824541
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395174592
+      }
+    ],
+    "6.7 编写路径选择和录制的属性与示例测试（追加到 `tests/export-client.test.mjs`）": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393703113
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395182593
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395578367
+      }
+    ],
+    "7.3 编写 `tests/export-app.test.mjs`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393704642
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395588654
+      },
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396034574
+      }
+    ],
+    "1. 提取 Server 共用辅助函数": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393923637
+      }
+    ],
+    "3. Fake_FFmpeg 测试夹具": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794393923970
+      }
+    ],
+    "2. 实现 `export-service.js` 的纯函数": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394654199
+      }
+    ],
+    "6. 浏览器端 `public/js/export-client.js`": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794394809570
+      }
+    ],
+    "4. Export_Service 服务工厂与 HTTP 接口": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395575436
+      }
+    ],
+    "7. 练习室界面接入": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794395576084
+      }
+    ],
+    "8. 文档": [
+      {
+        "executionId": "a0b2a270-5bc3-4923-83d2-2efa98f375b0",
+        "chatSessionId": "sess_f2ac162a-9417-449e-b9fb-77ccc5f7a614",
+        "timestamp": 1794396034031
+      }
+    ]
+  }
+}

@@ -7,10 +7,10 @@ import { encodeWav } from './wav.js';
 self.postMessage({ type: 'ready' });
 
 self.onmessage = async ({ data }) => {
-  const { channels, sampleRate } = data;
+  const { channels, sampleRate, mode } = data;
   try {
     let last = -1;
-    const { bpm } = await separateChannels(channels, sampleRate, {
+    const res = await separateChannels(channels, sampleRate, {
       onProgress: (p) => {
         const pct = Math.floor(p * 100);
         if (pct !== last) { last = pct; self.postMessage({ type: 'progress', value: p }); }
@@ -19,8 +19,8 @@ self.onmessage = async ({ data }) => {
         const wav = encodeWav(chs, sampleRate);
         self.postMessage({ type: 'stem', id, wav }, [wav]);
       },
-    });
-    self.postMessage({ type: 'done', bpm });
+    }, { mode, consumeInput: true });
+    self.postMessage({ type: 'done', bpm: res.bpm, mode: res.mode });
   } catch (err) {
     self.postMessage({ type: 'error', message: String(err && err.message || err) });
   }
