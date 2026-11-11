@@ -2,6 +2,10 @@
 import { separateChannels } from './separator.js';
 import { encodeWav } from './wav.js';
 
+// Tells the page the module graph loaded, so later failures are real errors
+// and not a reason to fall back to the main thread.
+self.postMessage({ type: 'ready' });
+
 self.onmessage = async ({ data }) => {
   const { channels, sampleRate } = data;
   try {

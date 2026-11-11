@@ -1,5 +1,5 @@
 import { SyncPlayer, SPEEDS } from './player.js';
-import { runSeparation, STEMS, STEM_NOTES } from './separator.js';
+import { runSeparation, separationLimitMessage, STEMS, STEM_NOTES } from './separator.js';
 import { encodeWav } from './wav.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -100,6 +100,11 @@ export function formatTime(sec) {
 function render() {
   const loaded = !!state.current;
   const d = player.duration;
+  // Files that skip decoding (too large, undecodable) still get a duration in 音乐台.
+  if (loaded && !state.current.duration && d) {
+    state.current.duration = d;
+    renderLibrary();
+  }
   const t = scrubbing != null ? scrubbing * d : player.currentTime;
   const ratio = d ? Math.min(1, t / d) : 0;
   const pct = `${(ratio * 100).toFixed(2)}%`;
@@ -159,14 +164,33 @@ function decodeAudio(arrayBuffer) {
   });
 }
 
+// Phones get tighter memory limits for separation (see separationLimitMessage).
+const isMobile = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+// Separated stems stay cached on their 音乐台 entry so re-opening a file is
+// instant. Each 3 minute song holds about 250 MB of WAV blobs, so only the most
+// recently used few are kept.
+const STEM_CACHE_LIMIT = 3;
+let useCounter = 0;
+function evictStemCaches() {
+  const cached = state.entries
+    .filter((e) => e.cache && e !== state.current)
+    .sort((a, b) => b.lastUsed - a.lastUsed);
+  for (const e of cached.slice(STEM_CACHE_LIMIT - 1)) {
+    for (const u of Object.values(e.cache.urls)) URL.revokeObjectURL(u);
+    e.cache = null;
+  }
+}
+
 async function openEntry(entry) {
   if (state.abort) state.abort.abort();
   state.current = entry;
+  entry.lastUsed = ++useCounter;
   state.stemsReady = false;
-  state.separating = true;
-  state.progress = 0;
+  state.separating = !entry.cache;
+  state.progress = entry.cache ? 1 : 0;
   state.error = '';
-  state.analysis = null;
+  state.analysis = entry.cache ? entry.cache.analysis : null;
   state.selected = 'original';
 
   player.load(entry.file, entry.kind);
@@ -182,10 +206,21 @@ async function openEntry(entry) {
   render();
   renderLibrary();
 
+  if (entry.cache) {
+    player.setStems(entry.cache.urls);
+    state.stemsReady = true;
+    renderStems();
+    renderSheet();
+    return;
+  }
+
   const abort = new AbortController();
   state.abort = abort;
   const stillCurrent = () => state.current === entry && !abort.signal.aborted;
+  const mobile = isMobile();
   try {
+    const sizeMessage = separationLimitMessage({ bytes: entry.file.size, mobile });
+    if (sizeMessage) throw new Error(sizeMessage);
     const buf = await entry.file.arrayBuffer();
     if (!stillCurrent()) return;
     let audioBuffer;
@@ -204,6 +239,8 @@ async function openEntry(entry) {
     };
     renderLibrary();
     renderSheet();
+    const lengthMessage = separationLimitMessage({ duration: audioBuffer.duration, mobile });
+    if (lengthMessage) throw new Error(lengthMessage);
     const { urls, bpm } = await runSeparation(audioBuffer, {
       encode: encodeWav,
       signal: abort.signal,
@@ -219,6 +256,8 @@ async function openEntry(entry) {
     }
     player.setStems(urls);
     state.analysis.bpm = bpm;
+    entry.cache = { urls, analysis: state.analysis };
+    evictStemCaches();
     state.stemsReady = true;
     state.separating = false;
     state.progress = 1;
@@ -437,13 +476,14 @@ function renderSheet() {
     return;
   }
   const a = state.analysis;
+  const pending = state.separating ? '读取中' : '未知';
   const stats = document.createElement('div');
   stats.className = 'stats';
   stats.append(
     row('文件', state.current.name),
-    row('时长', a ? formatTime(a.duration) : '读取中'),
-    row('采样率', a ? `${a.sampleRate} Hz` : '读取中'),
-    row('声道', a ? (a.channels > 1 ? `立体声（${a.channels}）` : '单声道') : '读取中'),
+    row('时长', a ? formatTime(a.duration) : player.duration ? formatTime(player.duration) : pending),
+    row('采样率', a ? `${a.sampleRate} Hz` : pending),
+    row('声道', a ? (a.channels > 1 ? `立体声（${a.channels}）` : '单声道') : pending),
     row('估计 BPM', a && a.bpm ? String(Math.round(a.bpm)) : state.separating ? '分析中…' : '未知'),
   );
   body.append(stats);

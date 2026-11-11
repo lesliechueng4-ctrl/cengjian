@@ -7,8 +7,17 @@
 // requestAnimationFrame loop corrects drift.
 
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5];
-const DRIFT_LIMIT = 0.08;
-const DRIFT_COOLDOWN_MS = 400;
+// Drift handling: small drift is pulled back by nudging the stem's playbackRate
+// (pitch is preserved, so this is inaudible); only large drift hard-seeks, since
+// every seek on an <audio> element causes a short gap.
+export const DRIFT = {
+  seekLimit: 0.25, // seconds; above this the stem is re-seeked
+  nudgeStart: 0.04, // start nudging above this drift
+  nudgeStop: 0.01, // back to the exact rate below this drift
+  nudge: 0.05, // relative rate change while nudging (5%)
+  seekCooldownMs: 400,
+};
+const SEEK_SYNC_LIMIT = 0.08;
 
 function keepPitch(el) {
   el.preservesPitch = true;
@@ -30,8 +39,9 @@ export class SyncPlayer {
     this.rate = 1;
     this.loop = false;
     this.url = null;
-    this.lastCorrection = 0;
+    this.lastCorrection = -Infinity;
     this.switchToken = 0;
+    this.nudge = 0; // -1 slowing the stem, 0 exact rate, 1 speeding it up
     [video, audio].forEach((el) => {
       keepPitch(el);
       el.addEventListener('play', () => this.handleMasterPlay(el));
@@ -84,13 +94,14 @@ export class SyncPlayer {
     }
   }
 
+  /** Detach stem elements. Blob URLs belong to the caller (app.js caches them per file). */
   clearStems() {
     for (const el of Object.values(this.stems)) {
       el.pause();
-      URL.revokeObjectURL(el.src);
       el.removeAttribute('src');
       el.load();
     }
+    this.nudge = 0;
     this.stems = {};
     if (this.master) this.master.muted = false;
     this.activeId = 'original';
@@ -116,6 +127,8 @@ export class SyncPlayer {
     this.activeId = id;
     const token = ++this.switchToken;
     const next = this.activeStem();
+    if (prev && this.nudge) prev.playbackRate = this.rate;
+    this.nudge = 0;
     if (!next) {
       this.master.muted = false;
       if (prev) { prev.muted = true; prev.pause(); }
@@ -176,6 +189,7 @@ export class SyncPlayer {
 
   setRate(rate) {
     this.rate = rate;
+    this.nudge = 0;
     const els = [this.video, this.audio, ...Object.values(this.stems)];
     for (const el of els) { el.playbackRate = rate; el.defaultPlaybackRate = rate; keepPitch(el); }
     this.onUpdate();
@@ -206,7 +220,7 @@ export class SyncPlayer {
   handleSeeked(el) {
     if (el !== this.master) return;
     const stem = this.activeStem();
-    if (stem && Math.abs(stem.currentTime - el.currentTime) > DRIFT_LIMIT) stem.currentTime = el.currentTime;
+    if (stem && Math.abs(stem.currentTime - el.currentTime) > SEEK_SYNC_LIMIT) stem.currentTime = el.currentTime;
   }
 
   handleEnded(el) {
@@ -232,13 +246,29 @@ export class SyncPlayer {
       return;
     }
     const stem = this.activeStem();
-    if (stem && !stem.seeking && now - this.lastCorrection > DRIFT_COOLDOWN_MS) {
-      if (Math.abs(stem.currentTime - m.currentTime) > DRIFT_LIMIT) {
-        stem.currentTime = m.currentTime;
-        this.lastCorrection = now;
+    if (stem && !stem.seeking) {
+      const drift = stem.currentTime - m.currentTime; // > 0: stem is ahead
+      const abs = Math.abs(drift);
+      if (abs > DRIFT.seekLimit) {
+        if (now - this.lastCorrection > DRIFT.seekCooldownMs) {
+          this.setNudge(stem, 0);
+          stem.currentTime = m.currentTime;
+          this.lastCorrection = now;
+        }
+      } else if (abs > DRIFT.nudgeStart) {
+        this.setNudge(stem, drift > 0 ? -1 : 1);
+      } else if (abs < DRIFT.nudgeStop) {
+        this.setNudge(stem, 0);
       }
       if (stem.paused && !stem.ended) stem.play().catch(() => {});
     }
     this.onUpdate();
+  }
+
+  setNudge(stem, dir) {
+    if (dir === this.nudge) return;
+    this.nudge = dir;
+    stem.playbackRate = this.rate * (1 + dir * DRIFT.nudge);
+    keepPitch(stem);
   }
 }

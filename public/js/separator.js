@@ -15,7 +15,8 @@
 //    贝斯     harmonic part lowpassed at 250 Hz (4th order)
 //    和声伴奏 harmonic part minus 贝斯 minus 人声 (pads, chords, backing harmonies)
 //    额外打击乐 percussive part highpassed above 5 kHz (hats, shakers, claps)
-//    效果音   stereo side content of residual + percussive above 1.5 kHz
+//    效果音   stereo side content of residual + percussive above 1.5 kHz, played
+//            in phase on both channels so it stays audible when summed to mono
 //            (mono input: residual above 6 kHz, i.e. risers and noise sweeps)
 //    其他音效 HPSS residual: what is neither clearly tonal nor clearly transient
 // Mono input skips the center mask (everything counts as center).
@@ -47,9 +48,33 @@ export const STEM_NOTES = {
   bass: '谐波部分里 250 Hz 以下的低频。',
   harmony: '谐波部分去掉贝斯和人声后剩下的和弦、铺底、和声。',
   perc: '打击部分里 5 kHz 以上的高频：镲、沙锤、拍手等。',
-  fx: '立体声两侧的高频残余和瞬态，例如转场音效、扫频。',
+  fx: '立体声两侧的高频残余和瞬态，例如转场音效、扫频。左右同相输出，单喇叭也听得到。',
   other: '既不明显是旋律也不明显是打击的残余部分。',
 };
+
+// Separation keeps several full-length float copies plus 8 WAV blobs in memory
+// (about 800 MB peak for a 3 minute stereo song), so long files are refused
+// before they can crash a phone tab. Phones (coarse pointer) get tighter limits.
+export const SEPARATION_LIMITS = {
+  mobile: { seconds: 6 * 60, bytes: 500 * 1024 * 1024 },
+  desktop: { seconds: 15 * 60, bytes: 2 * 1024 * 1024 * 1024 },
+};
+
+/**
+ * @param {{bytes?: number, duration?: number, mobile: boolean}} info
+ * @returns {string} empty when separation may run, otherwise a message for the user
+ */
+export function separationLimitMessage({ bytes, duration, mobile }) {
+  const limit = mobile ? SEPARATION_LIMITS.mobile : SEPARATION_LIMITS.desktop;
+  const device = mobile ? '手机' : '电脑';
+  if (bytes != null && bytes > limit.bytes) {
+    return `文件超过 ${Math.round(limit.bytes / 1024 / 1024)} MB，在${device}上分离音轨容易内存不足，已跳过分离，原曲可以正常播放。建议先剪成需要的片段再上传。`;
+  }
+  if (duration != null && duration > limit.seconds) {
+    return `文件超过 ${limit.seconds / 60} 分钟，在${device}上分离音轨容易内存不足，已跳过分离，原曲可以正常播放。建议先剪成 ${limit.seconds / 60} 分钟以内的片段再上传。`;
+  }
+  return '';
+}
 
 function vocalBandWeight(freq) {
   if (freq < 120) return 0;
@@ -177,9 +202,9 @@ export async function separateChannels(channels, sampleRate, hooks = {}) {
     const side = new Float32Array(len);
     for (let i = 0; i < len; i++) side[i] = (RL[i] - RR[i] + PL[i] - PR[i]) / 2;
     const s = highpass(highpass(side, 1500, sampleRate), 1500, sampleRate);
-    const neg = new Float32Array(len);
-    for (let i = 0; i < len; i++) neg[i] = -s[i];
-    await emit('fx', [s, neg]);
+    // Same phase on both channels: the textbook [s, -s] side reconstruction
+    // sums to silence on mono phone speakers, single earbuds and mono mode.
+    await emit('fx', [s, s]);
   } else {
     await emit('fx', [highpass(highpass(RL, 6000, sampleRate), 6000, sampleRate)]);
   }
@@ -234,28 +259,40 @@ export function runSeparation(audioBuffer, opts) {
       return;
     }
     const urls = {};
-    let fellBack = false;
-    signal?.addEventListener('abort', () => {
-      if (fellBack) return;
-      fellBack = true;
+    let settled = false;
+    // The worker posts 'ready' as soon as its module graph loaded. Only a failure
+    // before that (no module worker support, script load error) falls back to the
+    // main thread; failures during separation are reported, not rerun.
+    let started = false;
+    const finish = () => {
+      if (settled) return false;
+      settled = true;
       worker.terminate();
+      return true;
+    };
+    const fail = (err) => {
+      if (!finish()) return;
       for (const u of Object.values(urls)) URL.revokeObjectURL(u);
-      reject(aborted());
-    }, { once: true });
+      reject(err);
+    };
+    signal?.addEventListener('abort', () => fail(aborted()), { once: true });
     const fallback = () => {
-      if (fellBack) return;
-      fellBack = true;
-      worker.terminate();
+      if (!finish()) return;
       for (const u of Object.values(urls)) URL.revokeObjectURL(u);
       mainThread().then(resolve, reject);
     };
-    worker.onerror = (e) => { e.preventDefault?.(); fallback(); };
+    worker.onerror = (e) => {
+      e.preventDefault?.();
+      if (!started) fallback();
+      else fail(new Error(`音轨分离失败：${e.message || '后台线程意外停止，可能是内存不足'}`));
+    };
     worker.onmessage = ({ data }) => {
-      if (fellBack) return;
-      if (data.type === 'progress') opts.onProgress?.(data.value);
+      if (settled) return;
+      if (data.type === 'ready') started = true;
+      else if (data.type === 'progress') opts.onProgress?.(data.value);
       else if (data.type === 'stem') urls[data.id] = toUrl(data.wav);
-      else if (data.type === 'done') { worker.terminate(); resolve({ urls, bpm: data.bpm }); }
-      else if (data.type === 'error') fallback();
+      else if (data.type === 'done') { finish(); resolve({ urls, bpm: data.bpm }); }
+      else if (data.type === 'error') fail(new Error(`音轨分离失败：${data.message || '未知错误'}`));
     };
     const channels = getChannels();
     worker.postMessage({ channels, sampleRate }, channels.map((c) => c.buffer));

@@ -4,7 +4,9 @@ import {
   fft, stft, istft, lowpass, highpass, rms, extractCenter, hpss, estimateBpm,
   biquadCoeffs, applyBiquad, processSegments, toMidSide, fromMidSide, medianFilter, stftPair, istftPair,
 } from '../public/js/dsp.js';
-import { separateChannels, STEMS } from '../public/js/separator.js';
+import {
+  separateChannels, separationLimitMessage, SEPARATION_LIMITS, STEMS,
+} from '../public/js/separator.js';
 
 const SR = 44100;
 
@@ -205,6 +207,36 @@ test('separateChannels emits every stem except the original', async () => {
   assert.ok(rms(mid(got.vocal[0])) > 0.5 * rms(voice));
   // bass stem mostly holds the 80 Hz tone (energy far above the vocal tone leakage)
   assert.ok(rms(mid(got.bass[0])) > 0.2);
+});
+
+test('效果音 stem stays audible when summed to mono', async () => {
+  const sr = 22050;
+  const n = sr * 2;
+  // high-frequency noise panned hard left: pure side content above 1.5 kHz
+  let seed = 12345;
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    L[i] = ((seed / 2 ** 32) - 0.5) * 0.4;
+  }
+  const hf = highpass(highpass(L, 3000, sr), 3000, sr);
+  const got = {};
+  await separateChannels([hf, R], sr, { onStem: (id, chs) => { got[id] = chs; } });
+  const [fl, fr] = got.fx;
+  const monoSum = new Float32Array(fl.length);
+  for (let i = 0; i < fl.length; i++) monoSum[i] = (fl[i] + fr[i]) / 2;
+  assert.ok(rms(mid(fl)) > 0.01, `fx level ${rms(mid(fl))}`);
+  assert.ok(rms(mid(monoSum)) > 0.9 * rms(mid(fl)), `mono ${rms(mid(monoSum))} vs ${rms(mid(fl))}`);
+});
+
+test('separationLimitMessage refuses long or huge files, tighter on phones', () => {
+  assert.equal(separationLimitMessage({ duration: 4 * 60, mobile: true }), '');
+  assert.match(separationLimitMessage({ duration: 7 * 60, mobile: true }), /6 分钟/);
+  assert.equal(separationLimitMessage({ duration: 7 * 60, mobile: false }), '');
+  assert.match(separationLimitMessage({ duration: 16 * 60, mobile: false }), /15 分钟/);
+  assert.match(separationLimitMessage({ bytes: SEPARATION_LIMITS.mobile.bytes + 1, mobile: true }), /500 MB/);
+  assert.equal(separationLimitMessage({ bytes: SEPARATION_LIMITS.mobile.bytes + 1, mobile: false }), '');
 });
 
 test('separateChannels handles mono input', async () => {
