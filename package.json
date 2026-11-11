@@ -1,0 +1,15 @@
+{
+  "name": "cengjian",
+  "version": "1.0.0",
+  "description": "层间 · 音乐练习：上传视频或音频，分离音轨，变速保持音高，循环练舞",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

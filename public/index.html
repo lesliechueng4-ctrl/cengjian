@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#e06c7a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="层间">
+  <meta name="description" content="层间 · 音乐练习：上传视频或音频，分离人声、伴奏、鼓、贝斯，变速保持音高，循环练舞。">
+  <title>层间 · 音乐练习</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 48 48" aria-hidden="true">
+          <defs>
+            <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#f08a9a"/>
+              <stop offset="1" stop-color="#9b6ad6"/>
+            </linearGradient>
+          </defs>
+          <path d="M8 28v-4a16 16 0 0 1 32 0v4" fill="none" stroke="url(#logoGrad)" stroke-width="3.5" stroke-linecap="round"/>
+          <rect x="5" y="26" width="8" height="14" rx="4" fill="url(#logoGrad)"/>
+          <rect x="35" y="26" width="8" height="14" rx="4" fill="url(#logoGrad)"/>
+          <g stroke="url(#logoGrad)" stroke-width="2.4" stroke-linecap="round">
+            <line x1="18" y1="30" x2="18" y2="36"/>
+            <line x1="22" y1="26" x2="22" y2="40"/>
+            <line x1="26" y1="28" x2="26" y2="38"/>
+            <line x1="30" y1="31" x2="30" y2="35"/>
+          </g>
+        </svg>
+        <div class="brand-text">
+          <h1>层间</h1>
+          <p>音乐练习</p>
+        </div>
+      </div>
+      <div class="capsule" aria-hidden="true">
+        <span class="capsule-dots">···</span>
+        <span class="capsule-sep"></span>
+        <span class="capsule-ring">◎</span>
+      </div>
+    </header>
+
+    <main class="views">
+      <!-- 首页 -->
+      <section class="view" id="view-home" data-view="home" hidden>
+        <div class="card hero">
+          <h2>层间 · 音乐练习</h2>
+          <p class="hero-slogan">跳舞人的听音乐神器：扒舞 / 复习 / 编舞 / freestyle 都可以用</p>
+          <ul class="feature-list">
+            <li>上传练习视频或音乐，自动拆出人声、纯伴奏、鼓、贝斯等音轨</li>
+            <li>切换音轨时画面不停，动作和音乐始终对齐</li>
+            <li>0.5× 到 1.5× 变速，音高保持不变</li>
+            <li>一键循环，反复抠同一段动作</li>
+            <li>全部在本机浏览器处理，文件不会上传</li>
+          </ul>
+          <button class="btn btn-primary btn-block" type="button" data-goto="practice">去练习室</button>
+        </div>
+      </section>
+
+      <!-- 音乐台 -->
+      <section class="view" id="view-library" data-view="library" hidden>
+        <h2 class="page-title">音乐台</h2>
+        <p class="muted">本次打开后上传过的文件，点一下回到练习室继续练。</p>
+        <ul class="library-list" id="libraryList"></ul>
+        <div class="empty" id="libraryEmpty">
+          <p>还没有上传过文件</p>
+          <button class="btn btn-outline" type="button" data-goto="practice">去上传</button>
+        </div>
+      </section>
+
+      <!-- 练习室 -->
+      <section class="view active" id="view-practice" data-view="practice">
+        <h2 class="page-title">上传视频或音频</h2>
+        <div class="practice-layout">
+          <div class="media-col">
+            <label class="dropzone" id="dropzone">
+              <input type="file" id="fileInput" accept="video/*,audio/*" hidden>
+              <svg viewBox="0 0 24 24" class="dropzone-icon" aria-hidden="true"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span class="dropzone-title">点击选择视频或音频</span>
+              <span class="dropzone-sub">支持 MP4 / MOV / WEBM / MP3 / M4A / WAV，电脑上也可以直接拖进来</span>
+            </label>
+
+            <div class="media-card" id="mediaCard" hidden>
+              <div class="stage" id="stage">
+                <video id="video" playsinline webkit-playsinline muted preload="auto"></video>
+                <div class="audio-art" id="audioArt" hidden>
+                  <div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <p class="audio-name" id="audioName"></p>
+                </div>
+                <button class="stage-tap" id="stageTap" type="button" aria-label="播放或暂停"></button>
+              </div>
+              <div class="controls">
+                <div class="progress" id="progress" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+                  <div class="progress-thumb" id="progressThumb"></div>
+                </div>
+                <div class="controls-row">
+                  <span class="time" id="timeTop">00:00 / 00:00</span>
+                  <div class="controls-buttons">
+                    <button class="icon-btn" id="ctlPlay" type="button" aria-label="播放">
+                      <svg viewBox="0 0 24 24" class="ico-play"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+                      <svg viewBox="0 0 24 24" class="ico-pause"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>
+                    </button>
+                    <button class="chip-btn" id="speedBtn" type="button" aria-label="播放速度">1×</button>
+                    <button class="icon-btn" id="loopBtn" type="button" aria-label="循环播放" aria-pressed="false">
+                      <svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stem-col">
+            <div class="section-head">
+              <h3>练习室</h3>
+              <a href="#analysis" class="link" id="analysisLink">真实分析</a>
+            </div>
+            <p class="stem-status" id="stemStatus">上传后会自动分离音轨</p>
+            <div class="stem-grid" id="stemGrid">
+              <button type="button" class="stem-btn selected" data-stem="original">原曲</button>
+              <button type="button" class="stem-btn" data-stem="inst" disabled>纯伴奏</button>
+              <button type="button" class="stem-btn" data-stem="vocal" disabled>人声</button>
+              <button type="button" class="stem-btn" data-stem="drums" disabled>鼓</button>
+              <button type="button" class="stem-btn" data-stem="bass" disabled>贝斯</button>
+              <button type="button" class="stem-btn" data-stem="harmony" disabled>和声伴奏</button>
+              <button type="button" class="stem-btn" data-stem="perc" disabled>额外打击乐</button>
+              <button type="button" class="stem-btn" data-stem="fx" disabled>效果音</button>
+              <button type="button" class="stem-btn" data-stem="other" disabled>其他音效</button>
+            </div>
+            <div class="action-row">
+              <button type="button" class="btn btn-primary play-toggle" id="playBtn" disabled>
+                <span class="when-playing">II 暂停</span><span class="when-paused">▶ 播放</span>
+              </button>
+              <button type="button" class="btn btn-outline" id="uploadBtn">+ 上传视频</button>
+              <span class="time" id="timeBottom">00:00 / 00:00</span>
+            </div>
+            <p class="footnote">画面与音乐同步 · 变速保持音高</p>
+            <p class="shortcuts desktop-only">快捷键：空格 播放/暂停 · ← → 快退/快进 5 秒 · 1 到 9 切换音轨 · L 循环</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 我的 -->
+      <section class="view" id="view-me" data-view="me" hidden>
+        <h2 class="page-title">我的</h2>
+        <div class="card settings">
+          <label class="setting-row">
+            <span>默认播放速度</span>
+            <select id="defaultSpeed">
+              <option value="0.5">0.5×</option>
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span>打开文件时自动循环</span>
+            <input type="checkbox" id="defaultLoop" class="switch">
+          </label>
+        </div>
+        <div class="card tips">
+          <h3>使用小贴士</h3>
+          <ul>
+            <li>循环按钮会让整首歌从头循环；想抠某一段，可以拖动进度条到那一段再开循环反复听。</li>
+            <li>变速只改变快慢，音高不变，慢速扒舞也不会变调。</li>
+            <li>切换音轨不会打断播放，画面和音乐一直对齐。</li>
+            <li>手机和电脑都能用；手机请和电脑连同一个 Wi-Fi 打开电脑上显示的地址。</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar" id="tabbar">
+      <button type="button" class="tab" data-tab="home">
+        <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span>首页</span>
+      </button>
+      <button type="button" class="tab" data-tab="library">
+        <svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="16" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <span>音乐台</span>
+      </button>
+      <button type="button" class="tab active" data-tab="practice">
+        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 9v6l5-3z" fill="currentColor"/></svg>
+        <span>练习室</span>
+      </button>
+      <button type="button" class="tab" data-tab="me">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>我的</span>
+      </button>
+    </nav>
+
+    <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+    <section class="sheet" id="analysisSheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-head">
+        <h3 id="sheetTitle">真实分析</h3>
+        <button type="button" class="icon-btn" id="sheetClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="sheet-body" id="sheetBody"></div>
+    </section>
+
+    <audio id="masterAudio" preload="auto"></audio>
+  </div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

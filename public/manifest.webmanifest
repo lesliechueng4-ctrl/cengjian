@@ -1,0 +1,14 @@
+{
+  "name": "层间 · 音乐练习",
+  "short_name": "层间",
+  "description": "上传视频或音频，分离音轨，变速保持音高，循环练舞",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#e06c7a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
