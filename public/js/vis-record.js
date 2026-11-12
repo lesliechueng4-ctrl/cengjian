@@ -4,7 +4,7 @@
 // 所有全局对象都可注入；导入时不访问 DOM。
 
 import { pickRecorderMime } from './export-client.js';
-import { sceneAt as defaultSceneAt } from './vis-scene.js';
+import { stageAt as defaultSceneAt } from './vis-lanes.js'; // audio-only: the flowing timeline, full size
 import { drawSceneToCanvas as defaultDrawSceneToCanvas } from './vis-canvas.js';
 import { lanesAt as defaultLanesAt, stackedLayout, LANE_BACKGROUND } from './vis-lanes.js';
 

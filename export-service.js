@@ -22,8 +22,7 @@ import {
 // ECMAScript built-ins and have no import-time side effects.
 import { decodeVisPayload, VIS_MAX_BYTES } from './public/js/vis-data.js';
 import { createRasterizer } from './public/js/vis-raster.js';
-import { sceneAt } from './public/js/vis-scene.js';
-import { lanesAt, stackedLayout, LANE_BACKGROUND } from './public/js/vis-lanes.js';
+import { lanesAt, stageAt, stackedLayout, LANE_BACKGROUND } from './public/js/vis-lanes.js';
 
 // ---------------------------------------------------------------------------
 // 2.1 Constants and configuration
@@ -1055,7 +1054,7 @@ export function createExportService(options = {}) {
       }
       // stacked: only the Lane_Strip is rendered (stem-lanes 12.5); standalone: full scene.
       const background = stacked ? LANE_BACKGROUND : VIS_BACKGROUND;
-      const frameShapes = stacked ? lanesAt : sceneAt;
+      const frameShapes = stacked ? lanesAt : stageAt;
       const parser = createProgressParser(plan.D);
       job.progress = parser.progress();
 

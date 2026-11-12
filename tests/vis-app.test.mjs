@@ -7,8 +7,9 @@ import { analyzeStem } from '../public/js/vis-analysis.js';
 import { VIS_STEM_IDS, createVisData, encodeVisPayload, decodeVisPayload } from '../public/js/vis-data.js';
 import { readVisSettings } from '../public/js/visualizer.js';
 import { UNSUPPORTED_TEXT } from '../public/js/export-client.js';
-import { lanesAt, LANE_ORDER } from '../public/js/vis-lanes.js';
-import { LAYER_COLORS } from '../public/js/vis-scene.js';
+import {
+  lanesAt, laneLayout, laneLabelSpecs, laneHeaderHeight, ROW_NAMES, ROW_COLORS,
+} from '../public/js/vis-lanes.js';
 import { readFileSync } from 'node:fs';
 
 // Drives the stem-visualizer wiring of app.js (Requirement 16.6) through the
@@ -337,7 +338,9 @@ class FakeVisWorker {
       }
       const { channels, sampleRate } = decodeWav(msg.wav);
       const r = analyzeStem(msg.id, channels, sampleRate);
-      this.reply({ type: 'result', id: msg.id, env: r.env, onsets: r.onsets, duration: r.duration });
+      const data = { type: 'result', id: msg.id, env: r.env, onsets: r.onsets, duration: r.duration };
+      if (r.marks) data.marks = r.marks;
+      this.reply(data);
     }, 0);
   }
   terminate() { this.terminated = true; }
@@ -440,6 +443,16 @@ const stemUrls = () => Object.fromEntries(Object.entries(player.stems).map(([id,
 const bytes = async (blob) => new Uint8Array(await blob.arrayBuffer());
 
 /** Vis_Data computed directly from the cached stem WAVs with the real Vis_Analyzer. */
+/** Lane_Labels app.js should show: one per row of the timeline, at the row's middle (320 px wide strip). */
+let laneData = null;
+function expectedLabels(selected, height) {
+  const layout = laneLayout(laneData, selected, height, laneHeaderHeight(laneData, 320, height));
+  return laneLabelSpecs(layout).map((spec) => {
+    const c = ROW_COLORS[spec.id];
+    return { text: ROW_NAMES[spec.id], top: `${spec.top}px`, hidden: !spec.visible, color: `rgb(${c[0]}, ${c[1]}, ${c[2]})`, cls: 'lane-label' };
+  });
+}
+
 async function expectedVis(urls) {
   const results = {};
   for (const id of VIS_STEM_IDS) {
@@ -603,11 +616,12 @@ test('opening another file mid-computation terminates the vis worker; video defa
   assert.equal(callCount(visCanvas), coverCalls, 'Cover_Canvas never drawn for a video file');
   globalThis.devicePixelRatio = undefined;
 
-  // Labels: 160 px strip, 原曲 selected → 8 equal lanes of 20 px, all visible, in Lane_Order (2.4).
-  assert.deepEqual(labelState(), LANE_ORDER.map((id, k) => {
-    const c = LAYER_COLORS[id];
-    return { text: stemLabel(id), top: `${20 * k + 10}px`, hidden: false, color: `rgb(${c[0]}, ${c[1]}, ${c[2]})`, cls: 'lane-label' };
-  }));
+  // Labels: one per row of the timeline (Kick / Snare / Hi-hat or 鼓, 贝斯, 人声, 和声), all visible at 160 px.
+  laneData = await expectedVis(snapshots['other.mp4']);
+  const labels = expectedLabels('original', 160);
+  assert.ok(labels.length >= 4 && labels.length <= 6, `rows: ${labels.map((l) => l.text)}`);
+  assert.ok(labels.every((l) => !l.hidden));
+  assert.deepEqual(labelState(), labels);
 });
 
 test('Vis_Toggle on a video file: Lane_Strip hidden / shown, both switches saved with the other settings', async () => {
@@ -631,7 +645,7 @@ test('Vis_Toggle on a video file: Lane_Strip hidden / shown, both switches saved
   assert.equal(visCanvas.hidden, true);
   assert.equal($('#video').hidden, false);
   assert.equal(savedSettings().visVideo, true);
-  assert.equal(laneLabels.children.length, LANE_ORDER.length, 'labels back');
+  assert.equal(laneLabels.children.length, expectedLabels('original', 160).length, 'labels back');
   flushFrames();
   assert.ok(callCount(laneCanvas) > drawn, 'drawn again after switching on');
   assert.deepEqual(readVisSettings({ visVideo: 1, visAudio: 'no' }), { visVideo: true, visAudio: true });
@@ -639,42 +653,43 @@ test('Vis_Toggle on a video file: Lane_Strip hidden / shown, both switches saved
 
 test('switching the Selected_Stem moves the Lane_Labels; short lanes hide theirs (2.4, 2.5, 5.4)', () => {
   const spans = [...laneLabels.children];
+  const before = labelState();
   stemBtn('vocal').click();
-  // 160 px: vocal 3 × 16 = 48 px, the others 16 px — all ≥ 14 px, all visible.
-  const near = (top, v) => Math.abs(parseFloat(top) - v) < 1e-6 && top.endsWith('px');
-  const idx = LANE_ORDER.indexOf('vocal');
+  // The selected row is 1.8× as tall, so every label moves; the rows themselves stay the same.
   let state = labelState();
-  assert.deepEqual(laneLabels.children, spans, 'the same span per Stem is reused');
-  // drums 0–16, perc 16–32, bass 32–48, vocal 48–96, harmony 96–112, inst, fx, other.
-  [8, 24, 40, 72, 104, 120, 136, 152].forEach((v, k) => assert.ok(near(state[k].top, v), `${LANE_ORDER[k]}: ${state[k].top}`));
-  assert.ok(state.every((s) => !s.hidden), 'all visible at 160 px');
+  assert.deepEqual(laneLabels.children, spans, 'the same span per row is reused');
+  assert.deepEqual(state, expectedLabels('vocal', 160));
+  assert.notDeepEqual(state.map((s) => s.top), before.map((s) => s.top), 'labels moved');
 
   const drawn = callCount(laneCanvas);
   flushFrames();
   assert.ok(callCount(laneCanvas) > drawn, 'new layout drawn on the next frame');
 
-  // 112 px (narrow phone): vocal 33.6 px, the others 11.2 px → only vocal keeps its label.
-  resize(112);
+  // 72 px: rows shorter than 14 px hide their label; the selected row keeps it longest.
+  resize(72);
   state = labelState();
-  assert.deepEqual(state.map((s) => s.hidden), LANE_ORDER.map((id) => id !== 'vocal'));
-  assert.ok(near(state[idx].top, 33.6 + 33.6 / 2), state[idx].top);
+  assert.deepEqual(state, expectedLabels('vocal', 72));
+  assert.ok(state.some((s) => s.hidden), 'short rows hide their label');
+  assert.equal(state.find((s) => s.text === ROW_NAMES.vocal).hidden, false, 'the selected row is tall enough');
 
-  // 原曲 at 112 px: 8 equal lanes of 14 px, exactly at the limit → all visible.
+  // 原曲 at 112 px (narrow phone): every row is at least 14 px → all visible.
+  resize(112);
   stemBtn('original').click();
   state = labelState();
+  assert.deepEqual(state, expectedLabels('original', 112));
   assert.ok(state.every((s) => !s.hidden));
-  [7, 21, 35, 49, 63, 77, 91, 105].forEach((v, k) => assert.ok(near(state[k].top, v), `${LANE_ORDER[k]}: ${state[k].top}`));
 });
 
-test('prefers-reduced-motion change: the next Lane_Strip frame drops the Playhead_Flash (7.1, 7.3)', async () => {
+test('prefers-reduced-motion change: the next Lane_Strip frame drops the Pop rings', async () => {
   resize(160);
   const data = await expectedVis(snapshots['other.mp4']);
   const opts = { selected: 'original', width: 480, height: 240, reducedMotion: false };
   let t = null;
   for (let k = 0; k <= Math.round(data.duration * 1000) && t == null; k++) {
-    if (lanesAt(k / 1000, data, opts).some((s) => s.role === 'flash')) t = k / 1000;
+    if (lanesAt(k / 1000, data, opts).some((s) => s.role === 'pop')) t = k / 1000;
   }
-  assert.ok(t != null, 'test data has an Onset to flash on');
+  assert.ok(t != null, 'test data has a hit to pop on');
+  const gradients = (calls) => calls.filter((c) => c === 'createRadialGradient').length;
   globalThis.devicePixelRatio = 1.5;
   try {
     player.seek(t);
@@ -682,14 +697,15 @@ test('prefers-reduced-motion change: the next Lane_Strip frame drops the Playhea
     flushFrames();
     let calls = callsSince(laneCanvas, n);
     assert.ok(calls.length > 0, 'redrawn at the new time');
-    assert.ok(calls.includes('createRadialGradient'), 'flash drawn as a disc');
+    const withPop = gradients(calls);
+    assert.ok(withPop > 0, 'hits and Pop rings drawn as radial shapes');
 
     setReducedMotion(true);
     n = callCount(laneCanvas);
     flushFrames();
     calls = callsSince(laneCanvas, n);
     assert.ok(calls.includes('fillRect'), 'redrawn after the setting changed');
-    assert.ok(!calls.includes('createRadialGradient'), 'no flash with reduced motion');
+    assert.ok(gradients(calls) < withPop, 'no Pop rings with reduced motion');
     assert.ok(calls.includes('fill'), 'still scrolling: Bands drawn');
   } finally {
     setReducedMotion(false);

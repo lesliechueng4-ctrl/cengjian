@@ -1,7 +1,7 @@
 // 同构模块：Vis_Data 的常量、组装、查询，以及 Vis_Payload 的编码 / 严格解码。
 // 只用 ECMAScript 内置对象和全局 TextDecoder；没有 import，导入时没有副作用。
 
-export const VIS_VERSION = 1;
+export const VIS_VERSION = 2;
 export const VIS_FRAME_RATE = 100;
 export const VIS_STEM_IDS = Object.freeze(['inst', 'vocal', 'drums', 'bass', 'harmony', 'perc', 'fx', 'other']);
 export const ONSET_STEM_IDS = Object.freeze(['drums', 'perc', 'fx', 'other']);
@@ -47,7 +47,155 @@ export function createVisData(results) {
     const onsets = isOnsetStem(id) && r.onsets != null ? Int32Array.from(r.onsets) : null;
     stems[id] = { env, onsets };
   }
-  return { version: VIS_VERSION, frameRate: VIS_FRAME_RATE, frames, duration, stems };
+  const visData = { version: VIS_VERSION, frameRate: VIS_FRAME_RATE, frames, duration, stems };
+  const marks = {};
+  for (const id of present) {
+    const m = results[id].marks;
+    if (!m) continue;
+    for (const key of MARK_KEYS) {
+      if (hasOwn(m, key) && m[key] != null) marks[key] = Int32Array.from(m[key]).filter((f) => f >= 0 && f < frames);
+    }
+  }
+  if (marks.B && (!marks.BL || marks.BL.length !== marks.B.length)) { delete marks.B; delete marks.BL; }
+  if (!marks.B) delete marks.BL;
+  if (Object.keys(marks).length) visData.marks = marks;
+  return finishVisData(visData);
+}
+
+// ---------- Marks, beat grid and entries ----------
+
+export const MARK_KEYS = Object.freeze(['K', 'S', 'H', 'B', 'BL']);
+export const BEAT_MIN_BPM = 70;
+export const BEAT_MAX_BPM = 140;
+export const BEAT_MIN_HITS = 16;
+export const BEAT_MIN_COHERENCE = 0.45;
+export const ENTRY_MIN_GAP_SEC = 3;
+export const ENTRY_MAX_GAP_SEC = 8;
+export const ENTRY_ROW_IDS = Object.freeze(['K', 'S', 'H', 'bass', 'vocal', 'harmony', 'fx', 'other']);
+
+/** How well the times sit on a grid of period q: |Σ e^(2πi·t/q)| / N, with the grid offset in [0, q). */
+function gridFit(times, q) {
+  let re = 0;
+  let im = 0;
+  for (let i = 0; i < times.length; i++) {
+    const a = (2 * Math.PI * times[i]) / q;
+    re += Math.cos(a);
+    im += Math.sin(a);
+  }
+  const n = times.length || 1;
+  let offset = (Math.atan2(im, re) / (2 * Math.PI)) * q;
+  if (offset < 0) offset += q;
+  return { c: Math.hypot(re, im) / n, offset };
+}
+
+/**
+ * Constant-tempo beat grid from the Kick and Snare hits (frame indices).
+ * Tempo: the 8th-note period (BPM 70–140) the hits sit on best. Beat = the 8th
+ * with more hits; snares mark beats 2 and 4; of the two candidates left, beat 1
+ * is the one with more kicks (a bass note start counts as half a kick). Returns null with too few hits or an unsteady tempo.
+ * @returns {{ period: number, phase: number } | null}  seconds; a bar starts at phase + 4·k·period
+ */
+export function fitBeat(kick, snare, frameRate = VIS_FRAME_RATE, bass = null) {
+  const K = kick ? Array.from(kick, (f) => f / frameRate) : [];
+  const S = snare ? Array.from(snare, (f) => f / frameRate) : [];
+  const times = K.concat(S);
+  if (times.length < BEAT_MIN_HITS) return null;
+  let best = { c: -1, bpm: 0, offset: 0 };
+  const scan = (from, to, step) => {
+    for (let bpm = from; bpm <= to + 1e-9; bpm += step) {
+      const r = gridFit(times, 30 / bpm);
+      if (r.c > best.c) best = { c: r.c, bpm, offset: r.offset };
+    }
+  };
+  scan(BEAT_MIN_BPM, BEAT_MAX_BPM, 0.1);
+  scan(best.bpm - 0.15, best.bpm + 0.15, 0.005);
+  if (!(best.c >= BEAT_MIN_COHERENCE)) return null;
+  const q = 30 / best.bpm;
+  const slot = (t) => {
+    const k = Math.round((t - best.offset) / q);
+    return Math.abs(t - best.offset - k * q) <= 0.25 * q ? k : null;
+  };
+  const mod = (v, m) => ((v % m) + m) % m;
+  const parity = [0, 0];
+  for (const t of times) { const k = slot(t); if (k !== null) parity[mod(k, 2)]++; }
+  const par = parity[1] > parity[0] ? 1 : 0;
+  const beatOf = (t) => { const k = slot(t); return k !== null && mod(k, 2) === par ? (k - par) / 2 : null; };
+  const sBy2 = [0, 0];
+  for (const t of S) { const b = beatOf(t); if (b !== null) sBy2[mod(b, 2)]++; }
+  const kBy4 = [0, 0, 0, 0];
+  for (const t of K) { const b = beatOf(t); if (b !== null) kBy4[mod(b, 4)]++; }
+  const candidates = sBy2[0] === sBy2[1] ? [0, 1, 2, 3] : sBy2[1] > sBy2[0] ? [0, 2] : [1, 3];
+  // Bass notes break ties (four-on-the-floor kicks cannot tell beat 1 from beat 3).
+  const score = Array.from(kBy4);
+  if (bass) for (const f of bass) { const b = beatOf(f / frameRate); if (b !== null) score[mod(b, 4)] += 0.5; }
+  let one = candidates[0];
+  for (const c of candidates) if (score[c] > score[one]) one = c;
+  const period = 2 * q;
+  const phase = mod(best.offset + par * q + one * period, 4 * period);
+  return { period, phase };
+}
+
+/**
+ * Frames where a row comes in after a silence of two bars (4 s without a beat
+ * grid; always between 3 and 8 s). Rows: K, S, H (hits), bass (notes, or its
+ * envelope without marks), vocal / harmony / fx / other (envelope: quiet below
+ * 10% of the stem's peak, in again at 25%). The very start of the file does not count.
+ * @returns {Record<string, Int32Array>}
+ */
+export function deriveEntries(visData) {
+  const out = {};
+  if (!visData || !visData.stems) return out;
+  const rate = visData.frameRate || VIS_FRAME_RATE;
+  const beat = visData.beat;
+  const gapSec = beat ? Math.min(ENTRY_MAX_GAP_SEC, Math.max(ENTRY_MIN_GAP_SEC, 8 * beat.period)) : 4;
+  const gap = Math.round(gapSec * rate);
+  const marks = visData.marks || {};
+  const fromMarks = (starts, lens) => {
+    const res = [];
+    let prevEnd = 0;
+    for (let i = 0; i < starts.length; i++) {
+      if (starts[i] - prevEnd >= gap) res.push(starts[i]);
+      prevEnd = Math.max(prevEnd, starts[i] + (lens ? lens[i] : 0));
+    }
+    return Int32Array.from(res);
+  };
+  const fromEnv = (env) => {
+    const res = [];
+    let lastActive = 0;
+    for (let i = 0; i < env.length; i++) {
+      if (env[i] >= 64 && i - lastActive >= gap) res.push(i);
+      if (env[i] >= 26) lastActive = i;
+    }
+    return Int32Array.from(res);
+  };
+  for (const key of ['K', 'S', 'H']) if (marks[key]) out[key] = fromMarks(marks[key], null);
+  if (marks.B && marks.BL) out.bass = fromMarks(marks.B, marks.BL);
+  for (const id of ['bass', 'vocal', 'harmony', 'fx', 'other']) {
+    if (out[id]) continue;
+    const stem = hasOwn(visData.stems, id) ? visData.stems[id] : null;
+    if (stem && stem.env) out[id] = fromEnv(stem.env);
+  }
+  return out;
+}
+
+/**
+ * A copy of visData whose bar starts `beats` beats later (the beat lines stay where they are, only
+ * the numbering moves). Without a beat grid the same object is returned.
+ */
+export function shiftBeat(visData, beats = 1) {
+  const beat = visData && visData.beat;
+  if (!beat || !(beat.period > 0) || !Number.isInteger(beats)) return visData;
+  const bar = 4 * beat.period;
+  const phase = (((beat.phase + beats * beat.period) % bar) + bar) % bar;
+  return { ...visData, beat: { period: beat.period, phase } };
+}
+
+/** Fills in the derived parts of a Vis_Data: `beat` (unless already set) and `entries`. */
+export function finishVisData(visData) {
+  const marks = visData.marks || {};
+  if (visData.beat === undefined) visData.beat = fitBeat(marks.K, marks.S, visData.frameRate, marks.B);
+  visData.entries = deriveEntries(visData);
+  return visData;
 }
 
 /**
@@ -217,17 +365,64 @@ export function encodeVisPayload(visData, selected) {
     if (isOnsetStem(id) && stem.onsets != null) item.onsets = Array.from(stem.onsets);
     stems[id] = item;
   }
-  return JSON.stringify({
+  const payload = {
     v: VIS_VERSION,
     frameRate: VIS_FRAME_RATE,
     frames: visData.frames,
     duration: visData.duration,
     selected,
     stems,
-  });
+  };
+  if (visData.marks) {
+    const marks = {};
+    for (const key of MARK_KEYS) if (visData.marks[key]) marks[key] = Array.from(visData.marks[key]);
+    if (Object.keys(marks).length) payload.marks = marks;
+  }
+  if (visData.beat) payload.beat = { period: visData.beat.period, phase: visData.beat.phase };
+  return JSON.stringify(payload);
 }
 
 const TOP_KEYS = Object.freeze(['v', 'frameRate', 'frames', 'duration', 'selected', 'stems']);
+const OPTIONAL_TOP_KEYS = Object.freeze(['marks', 'beat']);
+
+/** marks: { K?, S?, H?: strictly increasing frame indices; B? + BL?: note starts and lengths (≥ 1) }. */
+function decodeMarks(raw, frames) {
+  if (!isPlainObject(raw)) fail();
+  const keys = Object.keys(raw);
+  if (keys.length === 0 || !keys.every((k) => MARK_KEYS.includes(k))) fail();
+  if (hasOwn(raw, 'B') !== hasOwn(raw, 'BL')) fail();
+  const marks = {};
+  for (const key of keys) {
+    const list = raw[key];
+    if (!Array.isArray(list) || list.length > frames) fail();
+    const arr = new Int32Array(list.length);
+    let prev = -1;
+    for (let k = 0; k < list.length; k++) {
+      const v = list[k];
+      if (!Number.isInteger(v)) fail();
+      if (key === 'BL') {
+        if (v < 1 || v > frames) fail();
+      } else {
+        if (v < 0 || v >= frames || v <= prev) fail();
+        prev = v;
+      }
+      arr[k] = v;
+    }
+    marks[key] = arr;
+  }
+  if (marks.B && marks.B.length !== marks.BL.length) fail();
+  return marks;
+}
+
+function decodeBeat(raw) {
+  if (!isPlainObject(raw)) fail();
+  const keys = Object.keys(raw);
+  if (keys.length !== 2 || !hasOwn(raw, 'period') || !hasOwn(raw, 'phase')) fail();
+  const { period, phase } = raw;
+  if (typeof period !== 'number' || !Number.isFinite(period) || !(period >= 0.2 && period <= 2)) fail();
+  if (typeof phase !== 'number' || !Number.isFinite(phase) || !(phase >= 0 && phase <= 4 * period)) fail();
+  return { period, phase };
+}
 
 function fail() {
   throw new VisPayloadError(INVALID_MESSAGE);
@@ -261,7 +456,8 @@ export function decodeVisPayload(input) {
   }
   if (!isPlainObject(obj)) fail();
   const keys = Object.keys(obj);
-  if (keys.length !== TOP_KEYS.length || !keys.every((k) => TOP_KEYS.includes(k))) fail();
+  if (!TOP_KEYS.every((k) => hasOwn(obj, k))) fail();
+  if (!keys.every((k) => TOP_KEYS.includes(k) || OPTIONAL_TOP_KEYS.includes(k))) fail();
 
   if (obj.v !== VIS_VERSION || obj.frameRate !== VIS_FRAME_RATE) fail();
   const { duration, frames, selected } = obj;
@@ -309,8 +505,8 @@ export function decodeVisPayload(input) {
   }
   if (Object.keys(stems).length !== stemIds.length) fail(); // 有未知 Stem id
 
-  return {
-    visData: { version: VIS_VERSION, frameRate: VIS_FRAME_RATE, frames, duration, stems },
-    selected,
-  };
+  const visData = { version: VIS_VERSION, frameRate: VIS_FRAME_RATE, frames, duration, stems };
+  if (hasOwn(obj, 'marks')) visData.marks = decodeMarks(obj.marks, frames);
+  visData.beat = hasOwn(obj, 'beat') ? decodeBeat(obj.beat) : null;
+  return { visData: finishVisData(visData), selected };
 }

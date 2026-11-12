@@ -45,7 +45,11 @@ function startWorker(createWorker) {
     const p = s.pending;
     if (!p || data.id !== p.id) return;
     s.pending = null;
-    if (data.type === 'result') p.resolve({ env: data.env, onsets: data.onsets ?? null, duration: data.duration });
+    if (data.type === 'result') {
+      const r = { env: data.env, onsets: data.onsets ?? null, duration: data.duration };
+      if (data.marks) r.marks = data.marks;
+      p.resolve(r);
+    }
     else p.resolve(null); // 'stem-error' → skip this Stem
   };
   worker.onerror = (e) => {

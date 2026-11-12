@@ -13,8 +13,7 @@ import { createExportService } from '../export-service.js';
 import { createServer } from '../server.js';
 import { createVisData, encodeVisPayload, decodeVisPayload } from '../public/js/vis-data.js';
 import { createRasterizer } from '../public/js/vis-raster.js';
-import { sceneAt } from '../public/js/vis-scene.js';
-import { lanesAt, stackedLayout, LANE_BACKGROUND } from '../public/js/vis-lanes.js';
+import { lanesAt, stageAt, stackedLayout, LANE_BACKGROUND } from '../public/js/vis-lanes.js';
 import { listenFetchable } from './helpers/listen.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fake-ffmpeg.mjs', import.meta.url));
@@ -287,13 +286,13 @@ test('standalone: no source in argv, scale=1280:720, ceil(D × 30) frames from t
   assert.ok(!graph.includes('blend'), graph);
   assert.ok(hasSeq(argv, ['-t', '1.25']));
 
-  // The frames are sceneAt + rasterizer output on #0b0d14 with the payload's selected stem.
+  // The frames are stageAt (flowing timeline over the dim ambient scene) + rasterizer output on #0b0d14 with the payload's selected stem.
   const { visData, selected } = decodeVisPayload(payload);
   assert.equal(selected, 'vocal');
   const raster = createRasterizer(640, 360);
   const hash = crypto.createHash('sha256');
   for (let k = 0; k < frames; k++) {
-    const shapes = sceneAt(k / 30, visData, { selected, width: 640, height: 360, reducedMotion: false });
+    const shapes = stageAt(k / 30, visData, { selected, width: 640, height: 360, reducedMotion: false });
     hash.update(raster.render(shapes, [11, 13, 20]));
   }
   assert.equal(record.stdin.sha256, hash.digest('hex'));

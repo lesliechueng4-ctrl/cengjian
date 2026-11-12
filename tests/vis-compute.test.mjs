@@ -84,7 +84,9 @@ function makeWorkerFactory({ mode = 'ok', stemErrors = new Set() } = {}) {
           try {
             const { channels, sampleRate } = decodeWav(wav);
             const r = analyzeStem(id, channels, sampleRate);
-            w.onmessage?.({ data: { type: 'result', id, env: r.env, onsets: r.onsets, duration: r.duration } });
+            const data = { type: 'result', id, env: r.env, onsets: r.onsets, duration: r.duration };
+            if (r.marks) data.marks = r.marks;
+            w.onmessage?.({ data });
           } catch (err) {
             w.onmessage?.({ data: { type: 'stem-error', id, message: String(err) } });
           }
