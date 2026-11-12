@@ -2,216 +2,110 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  lanesAt, laneLayout, onsetsInWindow,
-  LANE_PAST_SEC, LANE_FUTURE_SEC, LANE_MAX_SAMPLES, LANE_MAX_MARKERS, LANE_FLASH_SEC,
-  LANE_ENV_SCALE, LANE_ONSET_ENV_SCALE, LANE_ALPHA, LANE_PAST_DIM, PLAYHEAD_COLOR,
+  lanesAt, stageAt, laneLayout, laneHeaderHeight, rowEmphasis, onsetsInWindow,
+  LANE_PAST_SEC, LANE_FUTURE_SEC, LANE_MAX_SAMPLES, LANE_MAX_MARKERS, LANE_POP_SEC, LANE_POP_SCALE,
+  LANE_ENTRY_SEC, LANE_ENV_SCALE, LANE_ALPHA, LANE_PAST_DIM, PLAYHEAD_COLOR, ROW_COLORS, ROW_NAMES,
+  STAGE_AMBIENT_LAYERS, STAGE_AMBIENT_ALPHA,
 } from '../public/js/vis-lanes.js';
-import { createVisData, envelopeAt, VIS_STEM_IDS, ONSET_STEM_IDS, ALL_STEM_IDS } from '../public/js/vis-data.js';
-import { LAYER_COLORS, emphasisFor, MAX_SHAPES } from '../public/js/vis-scene.js';
+import { finishVisData, envelopeAt, VIS_STEM_IDS, ALL_STEM_IDS } from '../public/js/vis-data.js';
+import { MAX_SHAPES, sceneAt } from '../public/js/vis-scene.js';
+import { createRasterizer } from '../public/js/vis-raster.js';
 import { forAll } from './helpers/prop.mjs';
 
 const RUNS = 100;
-const KINDS = ['disc', 'ring', 'wave', 'rect', 'band'];
-const SIZE_FIELDS = ['r', 'w', 'h', 'glow', 'width'];
+const KINDS = ['disc', 'ring', 'rect', 'band', 'text'];
 const EPS = 1e-6;
+const close = (a, b, eps = EPS) => Math.abs(a - b) <= eps;
 
 // ---------- generators ----------
 
 const pick = (rng, list) => list[Math.floor(rng() * list.length)];
-const isOnset = (id) => ONSET_STEM_IDS.includes(id);
 
-/** Envelope：全 0、逐帧随机、0/255 硬跳变块、平滑起伏、常数。 */
 function genEnv(rng, frames) {
   const env = new Uint8Array(frames);
-  const mode = Math.floor(rng() * 5);
-  if (mode === 1) {
-    for (let i = 0; i < frames; i++) env[i] = Math.floor(rng() * 256);
-  } else if (mode === 2) {
-    let i = 0;
-    let v = rng() < 0.5 ? 0 : 255;
-    while (i < frames) {
-      const len = 1 + Math.floor(rng() * 50);
-      env.fill(v, i, Math.min(frames, i + len));
-      i += len;
-      v = 255 - v;
-    }
-  } else if (mode === 3) {
-    const f = 0.01 + rng() * 0.2;
-    const ph = rng() * 6.28;
-    for (let i = 0; i < frames; i++) env[i] = Math.round(127.5 + 127.5 * Math.sin(f * i + ph));
-  } else if (mode === 4) {
-    env.fill(Math.floor(rng() * 256));
+  const mode = rng();
+  if (mode < 0.1) return env;
+  let v = rng() * 255;
+  for (let i = 0; i < frames; i++) {
+    v = Math.min(255, Math.max(0, v + (rng() - 0.5) * 60));
+    env[i] = rng() < 0.05 ? 0 : Math.round(v);
   }
   return env;
 }
 
-/** 严格递增、间隔 ≥ 5 帧的 Onset 帧序号；极密集时每 5 帧一个（4 秒窗口内 80 个，超过 48 个上限）。 */
-function genOnsets(rng, frames) {
-  const r = rng();
+/** 严格递增的帧序号，平均间隔 gap 帧。 */
+function genFrames(rng, frames, gap) {
   const out = [];
-  if (r < 0.1) return out;
-  const dense = r < 0.4;
-  let i = Math.floor(rng() * 20);
+  let i = Math.floor(rng() * gap);
   while (i < frames) {
     out.push(i);
-    i += dense ? 5 : 5 + Math.floor(rng() * 76);
+    i += 1 + Math.floor(rng() * 2 * gap);
   }
-  return out;
+  return Int32Array.from(out);
 }
 
-/** Vis_Data：随机 Stem 子集（可能只有一条、可能全静音），时长 [minDur, maxDur]。 */
-function genVisData(rng, { minDur = 0.3, maxDur = 8, ids } = {}) {
+function genVisData(rng, { minDur = 0.5, maxDur = 12, marks = true, beat = true } = {}) {
   const duration = minDur + rng() * (maxDur - minDur);
   const frames = Math.ceil(duration * 100);
-  let subset = ids;
-  if (!subset) {
-    subset = VIS_STEM_IDS.filter(() => rng() < 0.6);
-    if (subset.length === 0) subset = [pick(rng, VIS_STEM_IDS)];
+  const stems = {};
+  for (const id of VIS_STEM_IDS) {
+    if (rng() < 0.8) stems[id] = { env: genEnv(rng, frames), onsets: ['drums', 'perc', 'fx', 'other'].includes(id) ? genFrames(rng, frames, 20) : null };
   }
-  const silent = rng() < 0.1;
-  const results = {};
-  for (const id of subset) {
-    results[id] = {
-      env: silent ? new Uint8Array(frames) : genEnv(rng, frames),
-      onsets: isOnset(id) ? Int32Array.from(genOnsets(rng, frames)) : null,
-      duration,
-    };
+  const vd = { version: 2, frameRate: 100, frames, duration, stems };
+  if (marks) {
+    const m = {};
+    if (stems.drums) { m.K = genFrames(rng, frames, 30); m.S = genFrames(rng, frames, 60); m.H = genFrames(rng, frames, 8); }
+    if (stems.bass && rng() < 0.7) {
+      m.B = genFrames(rng, frames, 25);
+      m.BL = Int32Array.from(m.B, () => 1 + Math.floor(rng() * 40));
+    }
+    if (Object.keys(m).length) vd.marks = m;
   }
-  return createVisData(results);
+  vd.beat = beat && rng() < 0.7 ? { period: 0.3 + rng() * 0.5, phase: rng() } : null;
+  return finishVisData(vd);
 }
 
 const genSelected = (rng) => (rng() < 0.1 ? 'nope' : pick(rng, ALL_STEM_IDS));
 
-function genWidth(rng) {
-  const r = rng();
-  if (r < 0.15) return 1 + Math.floor(rng() * 8);
-  if (r < 0.3) return 1 + rng() * 4095;
-  return 1 + Math.floor(rng() * 4096);
+function genOpts(rng, { reduced } = {}) {
+  const o = {
+    selected: genSelected(rng),
+    width: rng() < 0.2 ? 1 + Math.floor(rng() * 40) : 100 + rng() * 1800,
+    height: rng() < 0.2 ? 1 + Math.floor(rng() * 20) : 40 + rng() * 700,
+    reducedMotion: reduced === undefined ? rng() < 0.3 : reduced,
+  };
+  if (rng() < 0.3) { o.pastSec = rng() * 2; o.futureSec = 0.2 + rng() * 5; }
+  if (rng() < 0.3) o.labels = true;
+  return o;
 }
 
-function genHeight(rng) {
-  const r = rng();
-  if (r < 0.2) return 1 + Math.floor(rng() * 20);
-  if (r < 0.4) return 1 + rng() * 511;
-  return 1 + Math.floor(rng() * 512);
-}
+const genTime = (rng, vd) => (rng() < 0.1 ? -1 + rng() * (vd.duration + 2) : rng() * vd.duration);
 
-/** pastSec / futureSec：缺省、合法值、0、无效值。 */
-function genWindowSec(rng) {
-  const r = rng();
-  if (r < 0.35) return undefined;
-  if (r < 0.75) return rng() * 4;
-  return pick(rng, [0, -1, NaN, Infinity, -Infinity, '2', null]);
-}
-
-/** 与模块文档一致的有效窗口：无效值各自回退，和为 0 时都回退。 */
-function effectiveWindow(opts) {
-  let past = Number.isFinite(opts.pastSec) && opts.pastSec >= 0 ? opts.pastSec : LANE_PAST_SEC;
-  let future = Number.isFinite(opts.futureSec) && opts.futureSec >= 0 ? opts.futureSec : LANE_FUTURE_SEC;
-  if (!(past + future > 0)) {
-    past = LANE_PAST_SEC;
-    future = LANE_FUTURE_SEC;
-  }
-  return { past, future };
-}
-
-function genOpts(rng, { reduced, withWindow = true } = {}) {
-  const opts = { selected: genSelected(rng), width: genWidth(rng), height: genHeight(rng) };
-  opts.reducedMotion = reduced ?? rng() < 0.5;
-  if (withWindow) {
-    const p = genWindowSec(rng);
-    const f = genWindowSec(rng);
-    if (p !== undefined) opts.pastSec = p;
-    if (f !== undefined) opts.futureSec = f;
-  }
-  return opts;
-}
-
-function onsetTimes(vd, id) {
-  const stem = vd.stems[id];
-  return stem && stem.onsets ? Array.from(stem.onsets, (i) => i / vd.frameRate) : [];
-}
-
-/** t：任意范围（窗口跨过 0 或时长）、网格上、让某个 Onset 落在窗口边界或闪光窗口内。 */
-function genTime(rng, vd, opts) {
-  const { past, future } = effectiveWindow(opts);
-  const dur = vd.duration;
-  const r = rng();
-  const all = [];
-  for (const id of Object.keys(vd.stems)) all.push(...onsetTimes(vd, id));
-  if (r < 0.4 || all.length === 0) return -3 + rng() * (dur + 6);
-  const tau = pick(rng, all);
-  if (r < 0.55) return tau + past;     // τ 恰在左边界
-  if (r < 0.7) return tau - future;    // τ 恰在右边界
-  if (r < 0.75) return tau;            // τ 恰在 Playhead
-  return tau + rng() * 0.2;            // 闪光窗口附近
-}
-
-// ---------- helpers ----------
-
-function gridOf(opts) {
-  const { past, future } = effectiveWindow(opts);
-  const W = opts.width;
+function windowOf(o) {
+  const past = Number.isFinite(o.pastSec) && o.pastSec >= 0 ? o.pastSec : LANE_PAST_SEC;
+  const future = Number.isFinite(o.futureSec) && o.futureSec >= 0 ? o.futureSec : LANE_FUTURE_SEC;
   const S = past + future;
-  const n = Math.min(LANE_MAX_SAMPLES, Math.max(1, Math.ceil(W / 2)));
-  return { past, future, S, n, dt: S / n, px: W / S, playheadX: (W * past) / S };
+  return { past, future, px: o.width / S, playheadX: (o.width * past) / S };
 }
 
-function laneMap(vd, opts) {
-  const map = new Map();
-  for (const lane of laneLayout(Object.keys(vd.stems), opts.selected, opts.height)) map.set(lane.id, lane);
-  return map;
-}
+const snapshot = (vd) => JSON.stringify(vd, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v));
 
-function snapshot(vd) {
-  const stems = {};
-  for (const [id, s] of Object.entries(vd.stems)) {
-    stems[id] = { env: Array.from(s.env), onsets: s.onsets ? Array.from(s.onsets) : null };
-  }
-  return { version: vd.version, frameRate: vd.frameRate, frames: vd.frames, duration: vd.duration, stems };
-}
+// ---------- determinism, purity, bounds ----------
 
-/** [t − past, t + future] ∩ [0, duration] 内的 Onset；超过 48 个时按 |τ − t|（并列取较早）保留 48 个，升序。 */
-function refMarkerTimes(vd, id, t, past, future) {
-  const lo = Math.max(t - past, 0);
-  const hi = Math.min(t + future, vd.duration);
-  const times = onsetTimes(vd, id).filter((tau) => tau >= lo && tau <= hi);
-  if (times.length <= LANE_MAX_MARKERS) return times;
-  const sorted = times.slice().sort((a, b) => (Math.abs(a - t) - Math.abs(b - t)) || (a - b));
-  return sorted.slice(0, LANE_MAX_MARKERS).sort((a, b) => a - b);
-}
-
-const close = (a, b, eps = EPS) => Math.abs(a - b) <= eps;
-
-// ---------- Property 1 ----------
-
-// Feature: stem-lanes, Property 1: Lane 场景确定性
-// **Validates: Requirements 8.1, 3.4, 3.5**
-test('Property 1: lanesAt is deterministic and does not mutate its inputs', async () => {
+test('lanesAt is deterministic and does not mutate its inputs', async () => {
   await forAll((rng) => {
     const vd = genVisData(rng);
-    const opts = genOpts(rng);
-    const base = Array.from({ length: 2 + Math.floor(rng() * 4) }, () => genTime(rng, vd, opts));
-    const times = base.concat(base.filter(() => rng() < 0.5));
-    for (let i = times.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [times[i], times[j]] = [times[j], times[i]];
-    }
-    return { vd, opts, times };
-  }, ({ vd, opts, times }) => {
+    return { vd, opts: genOpts(rng), t: genTime(rng, vd) };
+  }, ({ vd, opts, t }) => {
     const before = snapshot(vd);
-    const optsBefore = { ...opts };
-    const seq = times.map((t) => lanesAt(t, vd, opts));
-    for (let i = 0; i < times.length; i++) {
-      const fresh = lanesAt(times[i], createVisData(Object.fromEntries(
-        Object.entries(before.stems).map(([id, s]) => [id, {
-          env: Uint8Array.from(s.env), onsets: s.onsets ? Int32Array.from(s.onsets) : null, duration: vd.duration,
-        }]),
-      )), { ...optsBefore });
-      assert.deepStrictEqual(seq[i], fresh, `t=${times[i]}`);
-    }
-    assert.deepStrictEqual(snapshot(vd), before);
-    assert.deepStrictEqual(opts, optsBefore);
+    const optsBefore = JSON.stringify(opts);
+    const a = lanesAt(t, vd, opts);
+    const b = lanesAt(t, vd, opts);
+    assert.deepStrictEqual(a, b);
+    assert.equal(snapshot(vd), before);
+    assert.equal(JSON.stringify(opts), optsBefore);
+    for (const s of a) if (s.color) s.color[0] = -1; // 返回的颜色是副本
+    assert.deepStrictEqual(lanesAt(t, vd, opts), b);
   }, { runs: RUNS });
 });
 
@@ -228,320 +122,331 @@ test('isomorphism smoke: vis-lanes.js only has ./ imports and no host globals', 
   }
 });
 
-// ---------- Property 2 ----------
-
-// Feature: stem-lanes, Property 2: Lane 输出界限
-// **Validates: Requirements 8.2, 8.3, 8.4, 8.5, 4.4**
-test('Property 2: lanesAt output stays within shape, value, and lane bounds', async () => {
+test('lanesAt output: known kinds, finite numbers, alpha in [0, 1], at most MAX_SHAPES, Playhead last', async () => {
   await forAll((rng) => {
     const vd = genVisData(rng);
-    const opts = genOpts(rng, { withWindow: false });
-    return { vd, opts, t: genTime(rng, vd, opts) };
+    return { vd, opts: genOpts(rng), t: genTime(rng, vd) };
   }, ({ vd, opts, t }) => {
     const shapes = lanesAt(t, vd, opts);
-    assert.ok(shapes.length > 0 && shapes.length <= MAX_SHAPES, `count ${shapes.length}`);
-    const lanes = laneMap(vd, opts);
-    const { dt, px } = gridOf(opts);
-    const markers = new Map();
+    if (laneLayout(vd, opts.selected, opts.height).length === 0) {
+      assert.deepStrictEqual(shapes, []);
+      return;
+    }
+    assert.ok(shapes.length >= 1 && shapes.length <= MAX_SHAPES, `count ${shapes.length}`);
     for (const s of shapes) {
-      assert.ok(KINDS.includes(s.kind), `kind ${s.kind}`);
-      for (const [k, v] of Object.entries(s)) {
-        if (typeof v === 'number') assert.ok(Number.isFinite(v), `${k}=${v}`);
-      }
+      assert.ok(KINDS.includes(s.kind), s.kind);
       assert.ok(s.alpha >= 0 && s.alpha <= 1, `alpha ${s.alpha}`);
       assert.equal(s.color.length, 3);
-      for (const c of s.color) assert.ok(Number.isInteger(c) && c >= 0 && c <= 255, `color ${c}`);
-      for (const f of SIZE_FIELDS) if (f in s) assert.ok(s[f] >= 0, `${f}=${s[f]}`);
-      const lane = lanes.get(s.layer);
-      if (s.kind === 'band') {
-        assert.ok(Array.isArray(s.hs) && s.hs.length >= 2);
-        for (const v of s.hs) assert.ok(Number.isFinite(v) && v >= 0, `hs ${v}`);
-        const m = Math.max(...s.hs);
-        assert.ok(s.y - m >= lane.y - EPS && s.y + m <= lane.y + lane.h + EPS, 'band inside lane');
-        assert.ok(s.x0 >= -dt * px - EPS, `x0 ${s.x0}`);
-        assert.ok(s.x1 <= opts.width + dt * px + EPS, `x1 ${s.x1}`);
+      for (const f of ['x', 'y', 'x0', 'x1', 'r', 'w', 'h', 'glow', 'width', 'size']) {
+        if (f in s) assert.ok(Number.isFinite(s[f]), `${s.kind}.${f} = ${s[f]}`);
       }
-      if (s.role === 'marker') {
-        assert.ok(s.y >= lane.y - EPS && s.y + s.h <= lane.y + lane.h + EPS, 'marker inside lane');
-        markers.set(s.layer, (markers.get(s.layer) || 0) + 1);
-      }
+      for (const f of ['r', 'w', 'h', 'glow', 'width', 'size']) if (f in s) assert.ok(s[f] >= 0, `${s.kind}.${f}`);
+      if (s.kind === 'band') for (const h of s.hs) assert.ok(Number.isFinite(h) && h >= 0);
+      if (s.kind === 'text') assert.ok(typeof s.text === 'string' && s.text.length > 0);
     }
-    for (const [id, c] of markers) assert.ok(c <= LANE_MAX_MARKERS, `${id}: ${c} markers`);
-  }, { runs: RUNS });
-});
-
-test('Property 2: invalid sizes or empty stems give []', async () => {
-  const bad = [0, -1, -0.5, 0.5, NaN, Infinity, -Infinity, undefined, '100'];
-  await forAll((rng) => {
-    const vd = genVisData(rng);
-    const opts = genOpts(rng);
-    const which = Math.floor(rng() * 3);
-    if (which === 0) opts.width = pick(rng, bad);
-    else if (which === 1) opts.height = pick(rng, bad);
-    return { vd: which === 2 ? createVisData({}) : vd, opts, t: -2 + rng() * 10 };
-  }, ({ vd, opts, t }) => {
-    assert.deepStrictEqual(lanesAt(t, vd, opts), []);
-  }, { runs: RUNS });
-});
-
-// ---------- Property 5 ----------
-
-// Feature: stem-lanes, Property 5: 时间窗口映射与 Onset_Marker
-// **Validates: Requirements 3.1, 3.2, 3.3, 3.6, 4.3, 4.4**
-test('Property 5: Onset_Marker positions match the window reference model', async () => {
-  await forAll((rng) => {
-    const vd = genVisData(rng);
-    const opts = genOpts(rng);
-    return { vd, opts, t: genTime(rng, vd, opts) };
-  }, ({ vd, opts, t }) => {
-    const shapes = lanesAt(t, vd, opts);
-    const { past, future, px, playheadX } = gridOf(opts);
-    for (const lane of laneMap(vd, opts).values()) {
-      const got = shapes.filter((s) => s.layer === lane.id && s.role === 'marker');
-      if (!isOnset(lane.id)) {
-        assert.equal(got.length, 0);
-        continue;
-      }
-      const want = refMarkerTimes(vd, lane.id, t, past, future).map((tau) => playheadX + (tau - t) * px);
-      assert.equal(got.length, want.length, `${lane.id} marker count`);
-      for (let i = 0; i < want.length; i++) {
-        const s = got[i];
-        assert.ok(close(s.x + s.w / 2, want[i]), `${lane.id}[${i}] x ${s.x + s.w / 2} vs ${want[i]}`);
-        assert.ok(close(s.h, 0.7 * lane.h), 'marker height');
-        assert.ok(close(s.y + s.h / 2, lane.y + lane.h / 2), 'marker centre');
-      }
-    }
-    // 不传 pastSec / futureSec 等于传 1 / 3
-    const { pastSec, futureSec, ...rest } = opts;
-    assert.deepStrictEqual(lanesAt(t, vd, rest), lanesAt(t, vd, { ...rest, pastSec: 1, futureSec: 3 }));
-  }, { runs: RUNS });
-});
-
-test('onsetsInWindow includes both ends and clips to [0, duration]', () => {
-  const vd = createVisData({
-    drums: { env: new Uint8Array(200), onsets: Int32Array.from([0, 50, 100, 200, 250]), duration: 2 },
-    bass: { env: new Uint8Array(200), onsets: null, duration: 2 },
-  });
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 0.5, 1), [0.5, 1]);      // t0、t1 上的都包含
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 0.51, 0.99), []);
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', -1, 0), [0]);            // 0 上的包含
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 1.5, 5), [2]);           // 时长上的包含，之后的排除
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 2, 2), [2]);
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', -5, -0.1), []);
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 1, 0.5), []);            // t0 > t1
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', NaN, 1), []);
-  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 0, Infinity), []);
-  assert.deepStrictEqual(onsetsInWindow(vd, 'bass', 0, 2), []);
-  assert.deepStrictEqual(onsetsInWindow(vd, 'perc', 0, 2), []);
-  assert.deepStrictEqual(onsetsInWindow(null, 'drums', 0, 2), []);
-});
-
-// ---------- Property 6 ----------
-
-/** 每个 band 的采样 → [{ m, tau, h }]，m 为网格序号。 */
-function bandSamples(s, t, grid) {
-  const L = s.hs.length;
-  const out = [];
-  for (let j = 0; j < L; j++) {
-    const x = s.x0 + (j * (s.x1 - s.x0)) / (L - 1);
-    const tau = t + (x - grid.playheadX) / grid.px;
-    const m = Math.round(tau / grid.dt);
-    out.push({ m, tau, h: s.hs[j] });
-  }
-  return out;
-}
-
-/** stems 的 Proxy：每条 Stem 的 env 读取次数计数，不改变数据。 */
-function countingVisData(vd) {
-  const counts = Object.fromEntries(Object.keys(vd.stems).map((id) => [id, 0]));
-  const wrappers = {};
-  for (const [id, s] of Object.entries(vd.stems)) {
-    wrappers[id] = { get env() { counts[id]++; return s.env; }, onsets: s.onsets };
-  }
-  const stems = new Proxy(vd.stems, {
-    get: (target, key) => (Object.prototype.hasOwnProperty.call(wrappers, key) ? wrappers[key] : target[key]),
-  });
-  return { data: { ...vd, stems }, counts };
-}
-
-// Feature: stem-lanes, Property 6: 波形采样
-// **Validates: Requirements 4.1, 4.2, 4.8, 3.6, 10.4**
-test('Property 6: band samples sit on the grid and equal the scaled envelope', async () => {
-  await forAll((rng) => {
-    const vd = genVisData(rng);
-    const opts = genOpts(rng);
-    const grid = gridOf(opts);
-    return { vd, opts, t: genTime(rng, vd, opts), k: Math.floor(rng() * 101) - 50, grid };
-  }, ({ vd, opts, t, k, grid }) => {
-    const lanes = laneMap(vd, opts);
-    const perLane = (time) => {
-      const shapes = lanesAt(time, vd, opts);
-      const byLane = new Map();
-      for (const lane of lanes.values()) {
-        const bands = shapes.filter((s) => s.layer === lane.id && s.kind === 'band');
-        const pastB = bands.find((s) => s.side === 'past');
-        const futB = bands.find((s) => s.side === 'future');
-        if (pastB && futB) assert.equal(pastB.x1, futB.x0, 'past.x1 === future.x0');
-        const scale = isOnset(lane.id) ? LANE_ONSET_ENV_SCALE : LANE_ENV_SCALE;
-        const hs = new Map();
-        for (const b of bands) {
-          assert.ok(close(b.y, lane.y + lane.h / 2), 'band centre line');
-          for (const { m, tau, h } of bandSamples(b, time, grid)) {
-            assert.ok(Math.abs(tau / grid.dt - m) <= 1e-6, `off grid ${tau / grid.dt}`);
-            const want = scale * lane.h * envelopeAt(vd, lane.id, m * grid.dt);
-            assert.ok(close(h, want), `${lane.id} m=${m}: ${h} vs ${want}`);
-            if (m * grid.dt < 0 || m * grid.dt > vd.duration) assert.equal(h, 0, 'outside [0, duration] is 0');
-            hs.set(m, h);
-          }
-        }
-        byLane.set(lane.id, hs);
-      }
-      return byLane;
-    };
-    const a = perLane(t);
-    const b = perLane(t + k * grid.dt);
-    for (const [id, hsA] of a) {
-      for (const [m, h] of b.get(id)) if (hsA.has(m)) assert.equal(h, hsA.get(m), `${id} m=${m} shift ${k}`);
-    }
-  }, { runs: RUNS });
-});
-
-// Feature: stem-lanes, Property 6: 波形采样
-// **Validates: Requirements 10.4**
-test('Property 6: each grid point is sampled once per lane, at most 402 per frame', async () => {
-  await forAll((rng) => {
-    const vd = genVisData(rng, { minDur: 6, maxDur: 10 });
-    const opts = { selected: genSelected(rng), width: 40 + Math.floor(rng() * 4057), height: genHeight(rng) };
-    // 整个窗口（含一个采样间隔的余量）都在 [0, duration] 内，使每次 envelopeAt 都读 env
-    const t = 1.3 + rng() * (vd.duration - 4.6);
-    return { vd, opts, t };
-  }, ({ vd, opts, t }) => {
-    const { data, counts } = countingVisData(vd);
-    const someId = Object.keys(vd.stems)[0];
-    envelopeAt(data, someId, 0.5);
-    const perCall = counts[someId];
-    assert.ok(perCall > 0);
-    counts[someId] = 0;
-    const shapes = lanesAt(t, data, opts);
-    assert.deepStrictEqual(shapes, lanesAt(t, vd, opts), 'proxy does not change the output');
-    const grid = gridOf(opts);
-    for (const id of Object.keys(vd.stems)) {
-      assert.equal(counts[id] % perCall, 0);
-      const calls = counts[id] / perCall;
-      assert.ok(calls <= LANE_MAX_SAMPLES + 2, `${id}: ${calls} calls`);
-      const ms = new Set();
-      for (const b of shapes.filter((s) => s.layer === id && s.kind === 'band')) {
-        for (const { m } of bandSamples(b, t, grid)) ms.add(m);
-      }
-      assert.equal(calls, ms.size, `${id}: ${calls} calls for ${ms.size} grid points`);
-    }
-  }, { runs: RUNS });
-});
-
-// ---------- Property 7 ----------
-
-function expectedBase(s) {
-  const onset = isOnset(s.layer);
-  const past = s.side === 'past';
-  if (s.role === 'baseline') return LANE_ALPHA.baseline;
-  if (s.role === 'band') return (onset ? LANE_ALPHA.faintBand : LANE_ALPHA.band) * (past ? LANE_PAST_DIM.band : 1);
-  if (s.role === 'marker') return LANE_ALPHA.marker * (past ? LANE_PAST_DIM.marker : 1);
-  throw new Error(`unexpected role ${s.role}`);
-}
-
-// Feature: stem-lanes, Property 7: 颜色与透明度模型
-// **Validates: Requirements 2.3, 4.2, 4.5, 5.3, 7.2**
-test('Property 7: colours come from LAYER_COLORS and alpha depends only on stem, selection, role and side', async () => {
-  await forAll((rng) => {
-    const vd = genVisData(rng);
-    const opts = genOpts(rng);
-    return { vd, opts, t: genTime(rng, vd, opts), t2: genTime(rng, vd, opts) };
-  }, ({ vd, opts, t, t2 }) => {
-    const alphaKeys = (shapes) => {
-      const map = new Map();
-      for (const s of shapes) {
-        if (!VIS_STEM_IDS.includes(s.layer)) continue;
-        assert.deepStrictEqual(s.color, [...LAYER_COLORS[s.layer]], `${s.layer} colour`);
-        if (s.role === 'flash') continue;
-        const a = emphasisFor(s.layer, opts.selected).alpha;
-        const want = Math.min(1, expectedBase(s) * a);
-        assert.ok(Math.abs(s.alpha - want) <= 1e-12, `${s.layer} ${s.role} ${s.side}: ${s.alpha} vs ${want}`);
-        map.set(`${s.layer}|${s.role}|${s.side}`, s.alpha);
-      }
-      return map;
-    };
-    const first = alphaKeys(lanesAt(t, vd, opts));
-    const second = alphaKeys(lanesAt(t2, vd, opts));
-    for (const [key, alpha] of first) if (second.has(key)) assert.equal(second.get(key), alpha, key);
-    // 淡 Band ≤ 0.3 × 同侧标记
-    for (const id of ONSET_STEM_IDS) {
-      if (!vd.stems[id]) continue;
-      const a = emphasisFor(id, opts.selected).alpha;
-      for (const side of ['past', 'future']) {
-        const band = first.get(`${id}|band|${side}`);
-        const marker = first.get(`${id}|marker|${side}`)
-          ?? Math.min(1, LANE_ALPHA.marker * (side === 'past' ? LANE_PAST_DIM.marker : 1) * a);
-        if (band !== undefined) assert.ok(band <= 0.3 * marker + 1e-12, `${id} ${side}: ${band} vs ${marker}`);
-      }
-    }
-  }, { runs: RUNS });
-});
-
-// ---------- Property 8 ----------
-
-// Feature: stem-lanes, Property 8: Playhead 与闪光
-// **Validates: Requirements 4.6, 4.7**
-test('Property 8: one white full-height Playhead and one flash per recently crossed Onset_Lane', async () => {
-  await forAll((rng) => {
-    const vd = genVisData(rng);
-    const opts = genOpts(rng, { reduced: false });
-    return { vd, opts, t: genTime(rng, vd, opts) };
-  }, ({ vd, opts, t }) => {
-    const shapes = lanesAt(t, vd, opts);
-    const { playheadX } = gridOf(opts);
-    const heads = shapes.filter((s) => s.role === 'playhead');
-    assert.equal(heads.length, 1);
-    const p = heads[0];
-    assert.ok(close(p.x + p.w / 2, playheadX), 'playhead x');
+    // Playhead：最后一个，白色，贯穿全高
+    const { playheadX } = windowOf(opts);
+    const p = shapes[shapes.length - 1];
+    assert.equal(p.role, 'playhead');
+    assert.deepStrictEqual(p.color, [...PLAYHEAD_COLOR]);
+    assert.equal(p.alpha, LANE_ALPHA.playhead);
     assert.equal(p.y, 0);
     assert.equal(p.h, opts.height);
-    assert.deepStrictEqual(p.color, [...PLAYHEAD_COLOR]);
-    assert.deepStrictEqual(p.color, [255, 255, 255]);
-    for (const lane of laneMap(vd, opts).values()) {
-      const flashes = shapes.filter((s) => s.layer === lane.id && s.role === 'flash');
-      if (!isOnset(lane.id)) {
-        assert.equal(flashes.length, 0, `${lane.id} has no flash`);
-        continue;
+    assert.ok(close(p.x + p.w / 2, playheadX));
+    assert.equal(shapes.filter((s) => s.role === 'playhead').length, 1);
+  }, { runs: RUNS });
+});
+
+test('invalid sizes, a non-finite time or no rows give []', () => {
+  const vd = finishVisData({ frameRate: 100, frames: 100, duration: 1, stems: { vocal: { env: new Uint8Array(100).fill(200), onsets: null } }, beat: null });
+  const ok = { selected: 'vocal', width: 300, height: 100 };
+  assert.ok(lanesAt(0.5, vd, ok).length > 0);
+  for (const bad of [{ width: 0 }, { width: NaN }, { height: 0.5 }, { height: Infinity }]) {
+    assert.deepStrictEqual(lanesAt(0.5, vd, { ...ok, ...bad }), []);
+  }
+  assert.deepStrictEqual(lanesAt(NaN, vd, ok), []);
+  assert.deepStrictEqual(lanesAt(0.5, null, ok), []);
+  assert.deepStrictEqual(lanesAt(0.5, { ...vd, stems: {} }, ok), []);
+  assert.deepStrictEqual(lanesAt(0.5, vd, undefined), []);
+});
+
+// ---------- hits ----------
+
+function rowBox(vd, opts, id) {
+  const header = laneHeaderHeight(vd, opts.width, opts.height);
+  return laneLayout(vd, opts.selected, opts.height, header).find((l) => l.id === id);
+}
+
+test('hits: one shape per Kick / Snare / Hi-hat in the window, at playheadX + (τ − t) × px, coloured by row', async () => {
+  await forAll((rng) => {
+    const vd = genVisData(rng, { minDur: 2 });
+    vd.stems.drums = vd.stems.drums || { env: genEnv(rng, vd.frames), onsets: genFrames(rng, vd.frames, 20) };
+    vd.marks = { ...(vd.marks || {}), K: genFrames(rng, vd.frames, 30), S: genFrames(rng, vd.frames, 60), H: genFrames(rng, vd.frames, 8) };
+    finishVisData(vd);
+    const opts = genOpts(rng, { reduced: false });
+    opts.width = 400 + rng() * 1200;
+    opts.height = 120 + rng() * 400;
+    return { vd, opts, t: genTime(rng, vd) };
+  }, ({ vd, opts, t }) => {
+    const { past, future, px, playheadX } = windowOf(opts);
+    const shapes = lanesAt(t, vd, opts);
+    const emph = rowEmphasis(laneLayout(vd, opts.selected, opts.height).map((l) => l.id), opts.selected);
+    for (const id of ['K', 'S', 'H']) {
+      const box = rowBox(vd, opts, id);
+      const cy = box.y + box.h / 2;
+      const lower = Math.max(0, t - past);
+      const upper = Math.min(vd.duration, t + future);
+      let want = Array.from(vd.marks[id], (f) => f / 100).filter((tau) => tau >= lower && tau <= upper);
+      while (want.length > LANE_MAX_MARKERS) {
+        if (Math.abs(want[want.length - 1] - t) >= Math.abs(want[0] - t)) want.pop();
+        else want.shift();
       }
-      const recent = onsetTimes(vd, lane.id)
-        .filter((tau) => tau > t - LANE_FLASH_SEC && tau <= t && tau >= 0 && tau <= vd.duration);
-      if (recent.length === 0) {
-        assert.equal(flashes.length, 0, `${lane.id}: no recent onset`);
-        continue;
+      const hits = shapes.filter((s) => s.layer === id && s.role === 'hit');
+      assert.equal(hits.length, want.length, `${id} count`);
+      hits.forEach((s, k) => {
+        const tau = want[k];
+        const age = t - tau;
+        const p = age >= 0 && age < LANE_POP_SEC ? 1 - age / LANE_POP_SEC : 0;
+        const cx = s.kind === 'disc' ? s.x : s.x + s.w / 2;
+        assert.ok(close(cx, playheadX + (tau - t) * px, 1e-5), `${id} x`);
+        assert.ok(close(s.kind === 'disc' ? s.y : s.y + s.h / 2, cy, 1e-5), `${id} y`);
+        assert.equal(s.kind, id === 'K' ? 'disc' : 'rect');
+        assert.deepStrictEqual(s.color, [...ROW_COLORS[id]]);
+        assert.equal(s.side, age >= 0 ? 'past' : 'future');
+        const base = p > 0 ? LANE_ALPHA.pop : age >= 0 ? LANE_ALPHA.past : LANE_ALPHA.future;
+        assert.ok(close(s.alpha, Math.min(1, base * emph[id])), `${id} alpha`);
+        if (id === 'K') assert.ok(close(s.r, Math.max(1.5, 0.2 * box.h) * (1 + LANE_POP_SCALE * p), 1e-5), 'Kick grows while popping');
+      });
+      // Pop：每个 0.25 秒内越过播放线的音符在播放线上炸一个圆环
+      const popping = want.filter((tau) => t - tau >= 0 && t - tau < LANE_POP_SEC && 1 - (t - tau) / LANE_POP_SEC > 0);
+      const rings = shapes.filter((s) => s.layer === id && s.role === 'pop');
+      assert.equal(rings.length, popping.length, `${id} pops`);
+      for (const r of rings) {
+        assert.equal(r.kind, 'ring');
+        assert.ok(close(r.x, playheadX) && close(r.y, cy, 1e-5));
       }
-      assert.equal(flashes.length, 1, `${lane.id}: one flash`);
-      const f = flashes[0];
-      const tau = Math.max(...recent);
-      const q = 1 - (t - tau) / LANE_FLASH_SEC;
-      const want = Math.min(1, 0.9 * q * q * emphasisFor(lane.id, opts.selected).alpha);
-      assert.ok(close(f.x, playheadX) && close(f.y, lane.y + lane.h / 2), 'flash position');
-      assert.ok(Math.abs(f.alpha - want) <= 1e-9, `flash alpha ${f.alpha} vs ${want}`);
     }
   }, { runs: RUNS });
 });
 
-// ---------- Property 9 ----------
+test('a hit is small and dim before the Playhead, largest and brightest right on it, dim again after 0.25 s', () => {
+  const vd = finishVisData({
+    frameRate: 100, frames: 400, duration: 4, beat: null,
+    stems: { drums: { env: new Uint8Array(400), onsets: null } }, marks: { K: Int32Array.of(200) },
+  });
+  const at = (t) => lanesAt(t, vd, { selected: 'drums', width: 800, height: 100 }).find((s) => s.role === 'hit');
+  const before = at(1.5);
+  const on = at(2.0);
+  const mid = at(2.1);
+  const after = at(2.3);
+  assert.equal(before.alpha, LANE_ALPHA.future);
+  assert.equal(on.alpha, LANE_ALPHA.pop);
+  assert.equal(after.alpha, LANE_ALPHA.past);
+  assert.ok(close(on.r, before.r * (1 + LANE_POP_SCALE)));
+  assert.ok(mid.r < on.r && mid.r > after.r);
+  assert.ok(close(after.r, before.r));
+  assert.ok(close(on.x, 200) && before.x > 200 && after.x < 200, 'flows from right to left through the Playhead at 25%');
+});
 
-// Feature: stem-lanes, Property 9: 减少动态效果
-// **Validates: Requirements 7.1**
-test('Property 9: reduced motion only removes Playhead_Flash', async () => {
+test('without marks the drum stem is one 鼓 row drawn from its Onsets', () => {
+  const vd = finishVisData({
+    frameRate: 100, frames: 300, duration: 3, beat: null,
+    stems: { drums: { env: new Uint8Array(300), onsets: Int32Array.of(50, 150, 250) } },
+  });
+  const shapes = lanesAt(1.0, vd, { selected: 'original', width: 800, height: 100 });
+  const hits = shapes.filter((s) => s.role === 'hit');
+  assert.deepStrictEqual(hits.map((s) => s.layer), ['drums', 'drums', 'drums']);
+  assert.ok(hits.every((s) => s.kind === 'disc'));
+  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', 0.5, 2.5), [0.5, 1.5, 2.5]);
+  assert.deepStrictEqual(onsetsInWindow(vd, 'drums', -1, 9), [0.5, 1.5, 2.5]);
+  assert.deepStrictEqual(onsetsInWindow(vd, 'vocal', 0, 3), []);
+});
+
+// ---------- bass notes ----------
+
+test('bass notes: a bar from start to end; the sounding one is taller and brightest', () => {
+  const vd = finishVisData({
+    frameRate: 100, frames: 600, duration: 6, beat: null,
+    stems: { bass: { env: new Uint8Array(600).fill(100), onsets: null } },
+    marks: { B: Int32Array.of(100, 300, 500), BL: Int32Array.of(50, 100, 20) },
+  });
+  const opts = { selected: 'bass', width: 800, height: 100 };
+  const { px, playheadX } = windowOf(opts);
+  const t = 3.5;
+  const notes = lanesAt(t, vd, opts).filter((s) => s.role === 'note');
+  assert.equal(notes.length, 2, 'the note that ended before the window is skipped');
+  const [sounding, next] = notes;
+  assert.ok(close(sounding.x, playheadX + (3 - t) * px) && close(sounding.w, 1 * px));
+  assert.ok(close(next.x, playheadX + (5 - t) * px) && close(next.w, 0.2 * px));
+  assert.equal(sounding.alpha, LANE_ALPHA.pop);
+  assert.equal(next.alpha, LANE_ALPHA.note);
+  assert.ok(sounding.h > next.h);
+  assert.equal(lanesAt(t, vd, opts).filter((s) => s.kind === 'band').length, 0, 'no waveform when the notes are known');
+  assert.equal(lanesAt(3.1, vd, opts).filter((s) => s.role === 'pop').length, 1, 'a note start pops too');
+  const past = lanesAt(4.5, vd, opts).filter((s) => s.role === 'note')[0];
+  assert.equal(past.alpha, LANE_ALPHA.past);
+});
+
+// ---------- waveform rows ----------
+
+test('waveform rows: band samples sit on a fixed time grid and equal the scaled envelope; the past part is dimmer', async () => {
   await forAll((rng) => {
-    const vd = genVisData(rng);
-    const opts = genOpts(rng);
-    return { vd, opts, t: genTime(rng, vd, opts) };
+    const vd = genVisData(rng, { marks: false, minDur: 2 });
+    vd.stems.vocal = { env: genEnv(rng, vd.frames), onsets: null };
+    finishVisData(vd);
+    const opts = { selected: genSelected(rng), width: 100 + rng() * 1500, height: 60 + rng() * 400, reducedMotion: rng() < 0.5 };
+    return { vd, opts, t: rng() * vd.duration };
   }, ({ vd, opts, t }) => {
-    const full = lanesAt(t, vd, { ...opts, reducedMotion: false });
-    const reduced = lanesAt(t, vd, { ...opts, reducedMotion: true });
-    assert.deepStrictEqual(reduced, full.filter((s) => s.role !== 'flash'));
+    const { past, future, px, playheadX } = windowOf(opts);
+    const S = past + future;
+    const n = Math.min(LANE_MAX_SAMPLES, Math.max(1, Math.ceil(opts.width / 2)));
+    const dt = S / n;
+    const box = rowBox(vd, opts, 'vocal');
+    const a = rowEmphasis(laneLayout(vd, opts.selected, opts.height).map((l) => l.id), opts.selected).vocal;
+    const bands = lanesAt(t, vd, opts).filter((s) => s.layer === 'vocal' && s.kind === 'band');
+    assert.ok(bands.length >= 1 && bands.length <= 2);
+    let samples = 0;
+    for (const b of bands) {
+      samples += b.hs.length;
+      const step = b.hs.length > 1 ? (b.x1 - b.x0) / (b.hs.length - 1) : 0;
+      b.hs.forEach((h, j) => {
+        const tau = t + (b.x0 + step * j - playheadX) / px;
+        const m = Math.round(tau / dt);
+        assert.ok(close(tau, m * dt, 1e-6), 'on the grid');
+        assert.ok(close(h, LANE_ENV_SCALE * box.h * envelopeAt(vd, 'vocal', m * dt), 1e-6), 'scaled envelope');
+      });
+      assert.ok(close(b.alpha, LANE_ALPHA.band * (b.side === 'past' ? LANE_PAST_DIM : 1) * a));
+      assert.ok(close(b.y, box.y + box.h / 2, 1e-6));
+    }
+    assert.ok(samples <= LANE_MAX_SAMPLES + 3);
   }, { runs: RUNS });
+});
+
+// ---------- beat grid ----------
+
+test('beat lines: one per beat in the window, every 4th is a bar line with number 1; none without a beat grid', async () => {
+  await forAll((rng) => {
+    const vd = genVisData(rng, { minDur: 3 });
+    vd.beat = { period: 0.3 + rng() * 0.6, phase: rng() * 2 };
+    const opts = { selected: genSelected(rng), width: 300 + rng() * 1500, height: 80 + rng() * 500 };
+    return { vd, opts, t: rng() * vd.duration };
+  }, ({ vd, opts, t }) => {
+    const { past, future, px, playheadX } = windowOf(opts);
+    const { period, phase } = vd.beat;
+    const shapes = lanesAt(t, vd, opts);
+    const lines = shapes.filter((s) => s.layer === 'beat' && s.kind === 'rect');
+    const want = [];
+    for (let n = Math.ceil((t - past - phase) / period); n <= Math.floor((t + future - phase) / period); n++) {
+      const tau = phase + n * period;
+      if (tau >= 0 && tau <= vd.duration) want.push({ tau, num: ((n % 4) + 4) % 4 });
+    }
+    assert.equal(lines.length, want.length);
+    lines.forEach((s, k) => {
+      assert.ok(close(s.x + s.w / 2, playheadX + (want[k].tau - t) * px, 1e-5));
+      assert.equal(s.role, want[k].num === 0 ? 'bar' : 'beat');
+      assert.equal(s.alpha, want[k].num === 0 ? LANE_ALPHA.bar : LANE_ALPHA.beat);
+    });
+    const numbers = shapes.filter((s) => s.role === 'beat-number');
+    if (laneHeaderHeight(vd, opts.width, opts.height) * 0.72 >= 6) {
+      assert.deepStrictEqual(numbers.map((s) => s.text), want.map((w) => String(w.num + 1)));
+    } else {
+      assert.equal(numbers.length, 0, 'numbers too small to read are left out');
+    }
+    // 没有拍子网格：没有拍线，行从顶部开始
+    const plain = lanesAt(t, { ...vd, beat: null }, opts);
+    assert.equal(plain.filter((s) => s.layer === 'beat').length, 0);
+  }, { runs: RUNS });
+});
+
+// ---------- entries ----------
+
+test('entry: for 1.2 s after a row comes in, the row flashes and shows 「<name> 进」', () => {
+  const env = new Uint8Array(1000);
+  env.fill(200, 600, 1000); // 人声在 6 秒处进
+  const vd = finishVisData({ frameRate: 100, frames: 1000, duration: 10, beat: null, stems: { vocal: { env, onsets: null } } });
+  assert.deepStrictEqual(Array.from(vd.entries.vocal), [600]);
+  const opts = { selected: 'original', width: 800, height: 100 };
+  const pickEntry = (t, o = opts) => {
+    const shapes = lanesAt(t, vd, o);
+    return { flash: shapes.find((s) => s.role === 'entry'), text: shapes.find((s) => s.role === 'entry-text') };
+  };
+  assert.deepStrictEqual(pickEntry(5.9), { flash: undefined, text: undefined });
+  const on = pickEntry(6.15);
+  assert.equal(on.text.text, `${ROW_NAMES.vocal} 进`);
+  assert.deepStrictEqual(on.text.color, [...ROW_COLORS.vocal]);
+  assert.ok(close(on.flash.alpha, LANE_ALPHA.entry), 'full strength 0.15 s in');
+  assert.ok(on.flash.x === 0 && on.flash.w === 800 && on.flash.y === 0 && on.flash.h === 100, 'the whole row');
+  const later = pickEntry(6.9);
+  assert.ok(later.flash.alpha < on.flash.alpha && later.flash.alpha > 0, 'fades');
+  assert.deepStrictEqual(pickEntry(6 + LANE_ENTRY_SEC + 0.01), { flash: undefined, text: undefined });
+  const reduced = pickEntry(6.15, { ...opts, reducedMotion: true });
+  assert.equal(reduced.flash, undefined, 'no flash with reduced motion');
+  assert.equal(reduced.text.text, `${ROW_NAMES.vocal} 进`, 'the name still shows');
+});
+
+// ---------- reduced motion ----------
+
+test('reduced motion: no Pop rings, no growing, no row flash; everything else is unchanged', async () => {
+  await forAll((rng) => {
+    const vd = genVisData(rng, { minDur: 2 });
+    return { vd, opts: genOpts(rng, { reduced: false }), t: rng() * vd.duration };
+  }, ({ vd, opts, t }) => {
+    const normal = lanesAt(t, vd, opts);
+    const reduced = lanesAt(t, vd, { ...opts, reducedMotion: true });
+    assert.equal(reduced.filter((s) => s.role === 'pop' || s.role === 'entry').length, 0);
+    const strip = (list) => list.filter((s) => s.role !== 'pop' && s.role !== 'entry')
+      .map((s) => (s.role === 'hit' ? { layer: s.layer, side: s.side, alpha: s.alpha, kind: s.kind } : s.role === 'entry-text' ? { ...s, alpha: 0 } : s));
+    if (normal.length < MAX_SHAPES) assert.deepStrictEqual(strip(reduced), strip(normal));
+    const { playheadX, px } = windowOf(opts);
+    for (const s of reduced.filter((x) => x.role === 'hit' && x.kind === 'disc')) {
+      const same = reduced.filter((x) => x.role === 'hit' && x.kind === 'disc' && x.layer === s.layer);
+      assert.ok(same.every((x) => close(x.r, same[0].r)), 'all hits of a row have the same size');
+    }
+    assert.ok(Number.isFinite(playheadX) && Number.isFinite(px));
+  }, { runs: RUNS });
+});
+
+// ---------- stage (audio-only) ----------
+
+test('stageAt: the timeline with row names over the dimmed ambient layers of the scene', async () => {
+  await forAll((rng) => {
+    const vd = genVisData(rng, { minDur: 2 });
+    const opts = { selected: genSelected(rng), width: 640 + rng() * 640, height: 360 + rng() * 360, reducedMotion: rng() < 0.3 };
+    return { vd, opts, t: rng() * vd.duration };
+  }, ({ vd, opts, t }) => {
+    const stage = stageAt(t, vd, opts);
+    const lanes = lanesAt(t, vd, { ...opts, labels: true });
+    if (lanes.length === 0) {
+      assert.deepStrictEqual(stage, []);
+      return;
+    }
+    assert.deepStrictEqual(stage.slice(stage.length - lanes.length), lanes, 'timeline on top');
+    const ambient = stage.slice(0, stage.length - lanes.length);
+    const scene = sceneAt(t, vd, { selected: 'original', width: opts.width, height: opts.height, reducedMotion: opts.reducedMotion })
+      .filter((s) => STAGE_AMBIENT_LAYERS.includes(s.layer));
+    assert.equal(ambient.length, scene.length);
+    ambient.forEach((s, k) => {
+      assert.ok(close(s.alpha, scene[k].alpha * STAGE_AMBIENT_ALPHA));
+      assert.deepStrictEqual({ ...s, alpha: 0 }, { ...scene[k], alpha: 0 });
+    });
+    const names = lanes.filter((s) => s.role === 'label').map((s) => s.text);
+    const rows = laneLayout(vd, opts.selected, opts.height).map((l) => ROW_NAMES[l.id]);
+    assert.deepStrictEqual(names, rows, 'one name per row');
+  }, { runs: RUNS });
+});
+
+test('the software rasterizer draws the timeline and ignores text shapes', () => {
+  const vd = finishVisData({
+    frameRate: 100, frames: 400, duration: 4, beat: { period: 0.5, phase: 0 },
+    stems: { drums: { env: new Uint8Array(400), onsets: null } }, marks: { K: Int32Array.of(100, 150, 200) },
+  });
+  const shapes = lanesAt(1.5, vd, { selected: 'original', width: 320, height: 96, labels: true });
+  assert.ok(shapes.some((s) => s.kind === 'text'));
+  const raster = createRasterizer(320, 96);
+  const withText = Uint8Array.from(raster.render(shapes, [11, 13, 20]));
+  const withoutText = Uint8Array.from(raster.render(shapes.filter((s) => s.kind !== 'text'), [11, 13, 20]));
+  assert.deepStrictEqual(withText, withoutText);
+  let lit = 0;
+  for (let i = 0; i < withText.length; i += 3) if (withText[i] > 100) lit++;
+  assert.ok(lit > 20, 'the popping Kick is drawn');
 });

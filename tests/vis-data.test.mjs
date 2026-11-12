@@ -71,7 +71,7 @@ test('Property 5: 合法 Vis_Payload 往返一致（字符串和 UTF-8 字节两
 const CORRUPTIONS = {
   extraTopKey: (o) => { o.extra = 1; return o; },
   missingTopKey: (o, rng) => { delete o[pick(rng, Object.keys(o))]; return o; },
-  wrongVersion: (o, rng) => { o.v = pick(rng, [0, 2, '1', null]); return o; },
+  wrongVersion: (o, rng) => { o.v = pick(rng, [0, 1, 3, '2', null]); return o; },
   wrongFrameRate: (o, rng) => { o.frameRate = pick(rng, [30, 60, 99, '100', 100.5]); return o; },
   durationNonPositive: (o, rng) => { o.duration = pick(rng, [0, -0.01, -5]); return o; },
   durationTooLong: (o) => { o.duration = 3600.01; o.frames = Math.ceil(o.duration * 100); return o; },

@@ -204,7 +204,18 @@ function drawBand(ctx, s, alpha) {
   ctx.fill();
 }
 
-const DRAWERS = { disc: drawDisc, ring: drawRing, wave: drawWave, rect: drawRect, band: drawBand };
+/** Text（拍号、行名、「人声 进」）：x 为左边缘（align 可改），y 为竖直中点。ctx 不支持文字或参数无效时跳过。 */
+function drawText(ctx, s, alpha) {
+  if (typeof ctx.fillText !== 'function' || typeof s.text !== 'string' || !s.text) return;
+  if (!isNum(s.x) || !isNum(s.y) || !isNum(s.size) || !(s.size > 0)) return;
+  ctx.font = `${s.weight === 500 ? 500 : 400} ${Math.round(s.size)}px system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif`;
+  ctx.textAlign = s.align === 'center' || s.align === 'right' ? s.align : 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = rgba(s.color, alpha);
+  ctx.fillText(s.text, s.x, s.y);
+}
+
+const DRAWERS = { disc: drawDisc, ring: drawRing, wave: drawWave, rect: drawRect, band: drawBand, text: drawText };
 
 /**
  * 在 Canvas2D 上绘制 Shape 列表（12.6）：先 fillRect 背景（transparent=true 时 clearRect），

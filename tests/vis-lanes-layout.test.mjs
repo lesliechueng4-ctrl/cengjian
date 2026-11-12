@@ -1,25 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  laneLayout, laneLabelSpecs, stackedLayout, LANE_ORDER, LANE_LABEL_MIN_PX,
+  laneLayout, laneLabelSpecs, laneRows, laneHeaderHeight, rowEmphasis, stackedLayout,
+  ROW_ORDER, LANE_LABEL_MIN_PX, LANE_SELECTED_WEIGHT, LANE_EMPHASIS,
 } from '../public/js/vis-lanes.js';
 import { VIS_STEM_IDS, ALL_STEM_IDS } from '../public/js/vis-data.js';
 import { forAll } from './helpers/prop.mjs';
 
 const RUNS = 100;
 const pick = (rng, list) => list[Math.floor(rng() * list.length)];
-const UNKNOWN_IDS = ['original', 'nope', '', '__proto__', 'Drums', 'toString'];
+const UNKNOWN_IDS = ['nope', '', '__proto__', 'Drums', 'toString'];
+const env = new Uint8Array(10);
 
-/** VIS_STEM_IDS 的随机子集，随机顺序、可重复、混入未知 id。 */
-function genIds(rng) {
-  const out = VIS_STEM_IDS.filter(() => rng() < 0.6);
-  const extra = Math.floor(rng() * 4);
-  for (let i = 0; i < extra; i++) out.push(out.length && rng() < 0.5 ? pick(rng, out) : pick(rng, UNKNOWN_IDS));
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
+/** Vis_Data 的骨架：VIS_STEM_IDS 的随机子集；有鼓时随机带 K / S / H，有贝斯时随机带 B / BL，随机带拍子网格。 */
+function genVisData(rng) {
+  const stems = {};
+  for (const id of VIS_STEM_IDS) if (rng() < 0.6) stems[id] = { env, onsets: null };
+  const vd = { frameRate: 100, frames: 10, duration: 0.1, stems, beat: rng() < 0.5 ? { period: 0.5, phase: 0 } : null };
+  const marks = {};
+  if (stems.drums && rng() < 0.7) for (const k of ['K', 'S', 'H']) if (rng() < 0.8) marks[k] = new Int32Array(0);
+  if (stems.bass && rng() < 0.5) { marks.B = new Int32Array(0); marks.BL = new Int32Array(0); }
+  if (Object.keys(marks).length) vd.marks = marks;
+  return vd;
 }
 
 const genSelected = (rng) => (rng() < 0.15 ? pick(rng, UNKNOWN_IDS) : pick(rng, ALL_STEM_IDS));
@@ -30,69 +32,104 @@ function genHeight(rng, max = 1000) {
   return 1 + rng() * (max - 1);
 }
 
-// ---------- Property 3 ----------
+function expectedRows(vd, selected) {
+  const rows = [];
+  const hits = ['K', 'S', 'H'].filter((k) => vd.marks && vd.marks[k]);
+  if (hits.length) rows.push(...hits);
+  else if (vd.stems.drums) rows.push('drums');
+  for (const id of ['bass', 'vocal', 'harmony']) if (vd.stems[id]) rows.push(id);
+  if ((selected === 'fx' || selected === 'other') && vd.stems[selected]) rows.push(selected);
+  return rows;
+}
 
-// Feature: stem-lanes, Property 3: Lane 布局
-// **Validates: Requirements 2.1, 2.2, 5.1, 5.2**
-test('Property 3: laneLayout follows LANE_ORDER, tiles the height and weights the selected lane 3×', async () => {
-  await forAll((rng) => ({ ids: genIds(rng), selected: genSelected(rng), height: genHeight(rng) }),
-    ({ ids, selected, height }) => {
-      const layout = laneLayout(ids, selected, height);
-      const want = LANE_ORDER.filter((id) => ids.includes(id));
-      assert.deepStrictEqual(layout.map((l) => l.id), want);
-      if (want.length === 0) return;
-      assert.equal(layout[0].y, 0);
-      for (let k = 0; k + 1 < layout.length; k++) {
-        assert.ok(Math.abs(layout[k + 1].y - (layout[k].y + layout[k].h)) <= 1e-9, `gap after ${k}`);
-      }
-      const last = layout[layout.length - 1];
-      assert.ok(Math.abs(last.y + last.h - height) <= 1e-9, 'sum equals height');
-      const weighted = layout.length > 1 && want.includes(selected);
-      const rel = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
-      if (weighted) {
-        const sel = layout.find((l) => l.id === selected);
-        for (const l of layout) if (l !== sel) assert.ok(rel(sel.h, 3 * l.h), `${sel.h} vs 3 × ${l.h}`);
-      } else {
-        for (const l of layout) assert.ok(rel(l.h, layout[0].h), 'equal heights');
-      }
-    }, { runs: RUNS });
+test('laneRows: Kick / Snare / Hi-hat rows with marks, one 鼓 row without; fx / other only when selected; in ROW_ORDER', async () => {
+  await forAll((rng) => ({ vd: genVisData(rng), selected: genSelected(rng) }), ({ vd, selected }) => {
+    const rows = laneRows(vd, selected);
+    assert.deepStrictEqual(rows, expectedRows(vd, selected));
+    assert.deepStrictEqual(rows, ROW_ORDER.filter((id) => rows.includes(id)), 'ROW_ORDER');
+    assert.ok(!rows.includes('inst') && !rows.includes('perc'), 'no row for 纯伴奏 / 额外打击乐');
+  }, { runs: RUNS });
+  assert.deepStrictEqual(laneRows(null, 'drums'), []);
+  assert.deepStrictEqual(laneRows({}, 'drums'), []);
 });
 
-test('laneLayout: 8 stems, drums selected, 160 px → drums 48, others 16', () => {
-  const layout = laneLayout(VIS_STEM_IDS, 'drums', 160);
-  assert.deepStrictEqual(layout.map((l) => l.id), [...LANE_ORDER]);
-  for (const l of layout) {
-    assert.ok(Math.abs(l.h - (l.id === 'drums' ? 48 : 16)) <= 1e-9, `${l.id}: ${l.h}`);
-  }
-  assert.deepStrictEqual(laneLayout([], 'drums', 160), []);
-  assert.deepStrictEqual(laneLayout(['drums'], 'drums', 0), []);
-  assert.deepStrictEqual(laneLayout(['drums'], 'drums', NaN), []);
+test('rowEmphasis: the rows of the selected stem are 1 and the rest 0.5; otherwise all 0.85', () => {
+  const rows = ['K', 'S', 'H', 'bass', 'vocal', 'harmony'];
+  const all = Object.fromEntries(rows.map((id) => [id, LANE_EMPHASIS.all]));
+  const only = (...on) => Object.fromEntries(rows.map((id) => [id, on.includes(id) ? LANE_EMPHASIS.selected : LANE_EMPHASIS.other]));
+  assert.deepStrictEqual(rowEmphasis(rows, 'original'), all);
+  assert.deepStrictEqual(rowEmphasis(rows, 'inst'), all, '纯伴奏 has no row of its own');
+  assert.deepStrictEqual(rowEmphasis(rows, 'nope'), all);
+  assert.deepStrictEqual(rowEmphasis(rows, 'drums'), only('K', 'S', 'H'));
+  assert.deepStrictEqual(rowEmphasis(rows, 'perc'), only('H'), '额外打击乐 is the Hi-hat row');
+  assert.deepStrictEqual(rowEmphasis(rows, 'bass'), only('bass'));
+  assert.deepStrictEqual(rowEmphasis(['drums', 'bass'], 'perc'), { drums: LANE_EMPHASIS.all, bass: LANE_EMPHASIS.all }, 'no Hi-hat row');
 });
 
-// ---------- Property 4 ----------
-
-// Feature: stem-lanes, Property 4: Lane_Label 门限
-// **Validates: Requirements 2.4**
-test('Property 4: laneLabelSpecs centres each label and shows it iff h ≥ 14', async () => {
+test('laneLayout tiles [top, height) in row order; a selected row is 1.8× its normal share', async () => {
   await forAll((rng) => {
-    const ids = genIds(rng);
-    const lanes = LANE_ORDER.filter((id) => ids.includes(id)).length || 1;
-    // 高度集中在每条 Lane 14 px 附近，正好落在门限上的情况也会出现
+    const height = genHeight(rng);
+    return { vd: genVisData(rng), selected: genSelected(rng), height, top: rng() < 0.5 ? 0 : rng() * height * 0.3 };
+  }, ({ vd, selected, height, top }) => {
+    const layout = laneLayout(vd, selected, height, top);
+    const rows = laneRows(vd, selected);
+    assert.deepStrictEqual(layout.map((l) => l.id), rows);
+    if (rows.length === 0) return;
+    assert.ok(Math.abs(layout[0].y - top) <= 1e-9);
+    for (let k = 0; k + 1 < layout.length; k++) {
+      assert.ok(layout[k].h > 0);
+      assert.ok(Math.abs(layout[k + 1].y - (layout[k].y + layout[k].h)) <= 1e-9, `gap after ${k}`);
+    }
+    const last = layout[layout.length - 1];
+    assert.ok(Math.abs(last.y + last.h - height) <= 1e-9, 'ends at height');
+    // 选中与否只改变相对高度：同一行在选中时的占比是不选中时的 1.8 倍（按其余行归一化）
+    const plain = laneLayout(vd, 'original', height, top);
+    const emph = rowEmphasis(rows, selected);
+    const on = rows.filter((id) => emph[id] === LANE_EMPHASIS.selected);
+    const off = rows.filter((id) => emph[id] !== LANE_EMPHASIS.selected);
+    if (on.length && off.length && plain.length === layout.length) {
+      const h = (list, id) => list.find((l) => l.id === id).h;
+      const ratio = (h(layout, on[0]) / h(layout, off[0])) / (h(plain, on[0]) / h(plain, off[0]));
+      assert.ok(Math.abs(ratio - LANE_SELECTED_WEIGHT) <= 1e-6, `ratio ${ratio}`);
+    }
+  }, { runs: RUNS });
+  const vd = { stems: { drums: { env } } };
+  assert.deepStrictEqual(laneLayout(vd, 'drums', 0), []);
+  assert.deepStrictEqual(laneLayout(vd, 'drums', NaN), []);
+  assert.deepStrictEqual(laneLayout({ stems: {} }, 'drums', 160), []);
+  assert.deepStrictEqual(laneLayout(vd, 'drums', 160), [{ id: 'drums', y: 0, h: 160 }], 'a single row fills the strip');
+});
+
+test('laneHeaderHeight: min(0.1 × height, 0.03 × width) with a beat grid, 0 without', () => {
+  const beat = { period: 0.5, phase: 0 };
+  assert.equal(laneHeaderHeight({ beat }, 1600, 320), 32);
+  assert.equal(laneHeaderHeight({ beat }, 320, 160), 320 * 0.03);
+  assert.equal(laneHeaderHeight({ beat: null }, 1600, 320), 0);
+  assert.equal(laneHeaderHeight(null, 1600, 320), 0);
+  assert.equal(laneHeaderHeight({ beat }, 0, 320), 0);
+});
+
+test('laneLabelSpecs centres each label and shows it iff h ≥ 14', async () => {
+  await forAll((rng) => {
+    const vd = genVisData(rng);
+    const lanes = laneRows(vd, 'original').length || 1;
+    // 高度集中在每行 14 px 附近，正好落在门限上的情况也会出现
     const r = rng();
     const height = r < 0.3 ? 14 * lanes : r < 0.6 ? (10 + rng() * 8) * lanes : genHeight(rng, 300);
-    return { ids, selected: genSelected(rng), height };
-  }, ({ ids, selected, height }) => {
-    const layout = laneLayout(ids, selected, height);
+    return { vd, selected: genSelected(rng), height };
+  }, ({ vd, selected, height }) => {
+    const layout = laneLayout(vd, selected, height);
     const specs = laneLabelSpecs(layout);
     assert.equal(specs.length, layout.length);
     for (let i = 0; i < layout.length; i++) {
       const l = layout[i];
-      const s = specs[i];
-      assert.equal(s.id, l.id);
-      assert.equal(s.top, l.y + l.h / 2);
-      assert.equal(s.visible, l.h >= LANE_LABEL_MIN_PX, `h=${l.h}`);
+      const sp = specs[i];
+      assert.equal(sp.id, l.id);
+      assert.equal(sp.top, l.y + l.h / 2);
+      assert.equal(sp.visible, l.h >= LANE_LABEL_MIN_PX, `h=${l.h}`);
     }
   }, { runs: RUNS });
+  assert.deepStrictEqual(laneLabelSpecs(null), []);
 });
 
 // ---------- Property 13 ----------

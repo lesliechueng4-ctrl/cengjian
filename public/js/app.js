@@ -12,11 +12,12 @@ import {
   runBrowserRecording, exportVideoWithFallback, visFileLabel,
 } from './export-client.js';
 import { canBrowserVisRecord, createVisCompositor } from './vis-record.js';
-import { encodeVisPayload } from './vis-data.js';
+import { encodeVisPayload, shiftBeat } from './vis-data.js';
 import { createLiveVisualizer, readVisSettings } from './visualizer.js';
 import { computeVisData } from './vis-compute.js';
-import { lanesAt, laneLayout, laneLabelSpecs, LANE_BACKGROUND } from './vis-lanes.js';
-import { LAYER_COLORS } from './vis-scene.js';
+import {
+  lanesAt, stageAt, laneLayout, laneLabelSpecs, laneHeaderHeight, LANE_BACKGROUND, ROW_NAMES, ROW_COLORS,
+} from './vis-lanes.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -67,6 +68,7 @@ const els = {
   visCanvas: $('#visCanvas'),
   visToggle: $('#visToggle'),
   visHint: $('#visHint'),
+  beatShift: $('#beatShift'),
   laneStrip: $('#laneStrip'),
   laneCanvas: $('#laneCanvas'),
   laneLabels: $('#laneLabels'),
@@ -199,6 +201,7 @@ const reducedMotionQuery = typeof window.matchMedia === 'function' ? (q) => wind
 
 visualizer = createLiveVisualizer({
   canvas: els.visCanvas,
+  sceneAt: stageAt, // the same flowing timeline as the Lane_Strip, full size, over a dim ambient scene
   getTime: () => player.currentTime,
   isPlaying: () => !!state.current && !player.paused,
   getSelected: () => state.selected,
@@ -240,7 +243,8 @@ function renderLaneLabels() {
     return;
   }
   const height = Number(els.laneStrip.clientHeight) || 0;
-  const specs = laneLabelSpecs(laneLayout(Object.keys(data.stems || {}), state.selected, height));
+  const header = laneHeaderHeight(data, Number(els.laneStrip.clientWidth) || 0, height);
+  const specs = laneLabelSpecs(laneLayout(data, state.selected, height, header));
   const ids = new Set(specs.map((s) => s.id));
   for (const [id, span] of laneLabelEls) {
     if (!ids.has(id)) {
@@ -253,9 +257,8 @@ function renderLaneLabels() {
     if (!span) {
       span = document.createElement('span');
       span.className = 'lane-label';
-      const stem = STEMS.find((s) => s.id === spec.id);
-      span.textContent = stem ? stem.label : spec.id;
-      const c = LAYER_COLORS[spec.id];
+      span.textContent = ROW_NAMES[spec.id] || spec.id;
+      const c = ROW_COLORS[spec.id];
       if (c) span.style.color = `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
       box.appendChild(span);
       laneLabelEls.set(spec.id, span);
@@ -345,6 +348,11 @@ function renderVis() {
     els.visToggle.disabled = !entry || status !== 'ready' || !currentVisData();
     els.visToggle.setAttribute('aria-pressed', String(!!entry && !!visEnabledFor(entry.kind)));
   }
+  if (els.beatShift) {
+    // Only with a beat grid on screen: the numbering can be one or two beats off (e.g. a kick on every beat).
+    const data = currentVisData();
+    els.beatShift.hidden = !(entry && data && data.beat && visEnabledFor(entry.kind));
+  }
   if (els.visHint) {
     const hint = !entry ? '' : status === 'computing' ? '可视化准备中…' : status === 'failed' ? '可视化数据生成失败' : '';
     els.visHint.textContent = hint;
@@ -364,6 +372,16 @@ function toggleVis() {
   renderVis();
 }
 if (els.visToggle) els.visToggle.addEventListener('click', toggleVis);
+
+/** 第 1 拍 →: moves the bar start one beat later for this file (kept with its Vis_Data, also used by exports). */
+function shiftBeatOne() {
+  const entry = state.current;
+  const data = currentVisData();
+  if (!entry || !entry.cache || !data || !data.beat) return;
+  entry.cache.vis = shiftBeat(data, 1);
+  invalidateVis();
+}
+if (els.beatShift) els.beatShift.addEventListener('click', shiftBeatOne);
 window.addEventListener('resize', () => {
   invalidateVis();
   renderLaneLabels(); // the strip height follows the card width (2.5)

@@ -16,7 +16,9 @@ self.onmessage = ({ data }) => {
     const { channels, sampleRate } = decodeWav(data.wav);
     const r = analyzeStem(id, channels, sampleRate);
     const transfer = [r.env.buffer, ...(r.onsets ? [r.onsets.buffer] : [])];
-    self.postMessage({ type: 'result', id, env: r.env, onsets: r.onsets, duration: r.duration }, transfer);
+    const msg = { type: 'result', id, env: r.env, onsets: r.onsets, duration: r.duration };
+    if (r.marks) msg.marks = r.marks; // small arrays: copied, not transferred
+    self.postMessage(msg, transfer);
   } catch (err) {
     self.postMessage({ type: 'stem-error', id, message: String((err && err.message) || err) });
   }
