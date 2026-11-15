@@ -400,6 +400,19 @@ body.dragging .app::after {
 
 /* ---------- library ---------- */
 .library-list { list-style: none; margin: 0; padding: 0; }
+.library-list li { display: flex; align-items: stretch; gap: 8px; margin-bottom: 10px; }
+.library-list li .library-item { margin-bottom: 0; flex: 1; min-width: 0; }
+.library-remove {
+  flex: none;
+  min-width: 56px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: #888;
+  font-size: 13px;
+}
+.library-remove:hover { border-color: #d9534f; color: #d9534f; }
 .library-item {
   display: flex;
   align-items: center;
