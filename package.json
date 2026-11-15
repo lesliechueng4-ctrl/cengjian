@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build:win": "node scripts/build-win.mjs"
   },
   "engines": {
     "node": ">=18"
