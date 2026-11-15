@@ -18,6 +18,10 @@ export const DRIFT = {
   seekCooldownMs: 400,
 };
 const SEEK_SYNC_LIMIT = 0.08;
+// A-B range loop: shortest allowed range, and how far before the natural end B may sit
+// (the same margin the whole-song loop uses, so the stem never runs out first).
+export const RANGE_MIN_SEC = 0.2;
+const END_MARGIN = 0.06;
 
 function keepPitch(el) {
   el.preservesPitch = true;
@@ -38,6 +42,7 @@ export class SyncPlayer {
     this.activeId = 'original';
     this.rate = 1;
     this.loop = false;
+    this.range = null; // { a, b } in seconds while an A-B range loops
     this.url = null;
     this.lastCorrection = -Infinity;
     this.switchToken = 0;
@@ -49,7 +54,9 @@ export class SyncPlayer {
       el.addEventListener('ended', () => this.handleEnded(el));
       el.addEventListener('seeked', () => this.handleSeeked(el));
       el.addEventListener('loadedmetadata', () => this.onUpdate());
-      el.addEventListener('timeupdate', () => this.onUpdate());
+      // Also checks the A-B range here: timeupdate keeps firing in a background tab, where
+      // requestAnimationFrame (tick) is paused.
+      el.addEventListener('timeupdate', () => { if (el === this.master && !el.paused) this.wrapRange(); this.onUpdate(); });
       el.addEventListener('ratechange', () => this.onUpdate());
     });
     this.tick = this.tick.bind(this);
@@ -75,6 +82,7 @@ export class SyncPlayer {
     keepPitch(this.master);
     this.master.load();
     this.activeId = 'original';
+    this.range = null;
     this.onUpdate();
   }
 
@@ -200,6 +208,36 @@ export class SyncPlayer {
     this.onUpdate();
   }
 
+  /**
+   * Loop between two times (either order). setRange(null) clears it. The range
+   * loops whether or not whole-song loop is on. Returns false, changing nothing,
+   * when the range is shorter than RANGE_MIN_SEC or a time is not a number.
+   */
+  setRange(a, b) {
+    if (a == null) {
+      this.range = null;
+      this.onUpdate();
+      return true;
+    }
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    const d = this.duration;
+    const top = d ? Math.max(0, d - END_MARGIN) : Infinity;
+    const lo = Math.max(0, Math.min(a, b, top));
+    const hi = Math.min(Math.max(a, b), top);
+    if (hi - lo < RANGE_MIN_SEC) return false;
+    this.range = { a: lo, b: hi };
+    this.onUpdate();
+    return true;
+  }
+
+  /** Jumps back to A once playback has reached B. Returns true if it jumped. */
+  wrapRange() {
+    const r = this.range;
+    if (!r || !this.master || this.master.currentTime < r.b) return false;
+    this.seek(r.a);
+    return true;
+  }
+
   handleMasterPlay(el) {
     if (el !== this.master) return;
     const stem = this.activeStem();
@@ -225,8 +263,8 @@ export class SyncPlayer {
 
   handleEnded(el) {
     if (el !== this.master) return;
-    if (this.loop) {
-      this.seek(0);
+    if (this.range || this.loop) {
+      this.seek(this.range ? this.range.a : 0);
       this.play();
     } else {
       const stem = this.activeStem();
@@ -240,6 +278,7 @@ export class SyncPlayer {
     const m = this.master;
     if (!m || m.paused) return;
     const d = this.duration;
+    if (this.wrapRange()) return;
     // Loop slightly before the natural end so the stem never runs out first.
     if (this.loop && d && m.currentTime >= d - 0.06) {
       this.seek(0);

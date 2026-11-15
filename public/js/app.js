@@ -41,6 +41,9 @@ const els = {
   ctlPlay: $('#ctlPlay'),
   speedBtn: $('#speedBtn'),
   loopBtn: $('#loopBtn'),
+  abBtn: $('#abBtn'),
+  mirrorBtn: $('#mirrorBtn'),
+  progressRange: $('#progressRange'),
   stemStatus: $('#stemStatus'),
   cancelSeparation: $('#cancelSeparation'),
   stemButtons: $$('.stem-btn'),
@@ -78,6 +81,7 @@ const state = {
   entries: [], // { id, file, name, kind, duration }
   current: null,
   selected: 'original',
+  abStart: null, // A point in seconds while B is not set yet
   stemsReady: false,
   separating: false,
   progress: 0,
@@ -112,11 +116,12 @@ function loadSettings() {
     return {
       speed: SPEEDS.includes(s && s.speed) ? s.speed : 1,
       loop: !!(s && s.loop),
+      mirror: !!(s && s.mirror),
       demucsModel: sanitizeDemucsModel(s && s.demucsModel),
       ...readVisSettings(s), // visVideo / visAudio (6.6, 6.8)
     };
   } catch {
-    return { speed: 1, loop: false, demucsModel: DEFAULT_DEMUCS_MODEL, ...readVisSettings(null) };
+    return { speed: 1, loop: false, mirror: false, demucsModel: DEFAULT_DEMUCS_MODEL, ...readVisSettings(null) };
   }
 }
 const settings = loadSettings();
@@ -428,7 +433,31 @@ function render() {
   els.speedBtn.textContent = `${player.rate}×`;
   els.loopBtn.classList.toggle('on', player.loop);
   els.loopBtn.setAttribute('aria-pressed', String(player.loop));
+  renderRange(d, locked);
   invalidateVis(); // Player ticks, seeks, rate and loop changes (5.1–5.5)
+}
+
+/** A-B button text and the range band on the progress bar. */
+function renderRange(d, locked) {
+  const range = player.range;
+  const pending = !range && state.abStart != null;
+  if (els.abBtn) {
+    const text = range ? '取消 A-B' : pending ? '设 B 点' : '设 A 点';
+    if (els.abBtn.textContent !== text) els.abBtn.textContent = text;
+    els.abBtn.setAttribute('aria-pressed', String(!!range));
+    els.abBtn.disabled = locked || !state.current;
+  }
+  if (els.mirrorBtn) els.mirrorBtn.disabled = locked;
+  const band = els.progressRange;
+  if (!band) return;
+  const show = !!d && (!!range || pending);
+  band.hidden = !show;
+  if (!show) return;
+  const a = range ? range.a : state.abStart;
+  const b = range ? range.b : a;
+  band.classList.toggle('pending', !range);
+  band.style.left = `${(Math.min(1, a / d) * 100).toFixed(2)}%`;
+  band.style.width = `${(Math.max(0, Math.min(1, b / d) - Math.min(1, a / d)) * 100).toFixed(2)}%`;
 }
 
 function renderStems() {
@@ -643,6 +672,8 @@ async function openEntry(entry) {
   player.load(entry.file, entry.kind);
   player.setRate(settings.speed);
   player.setLoop(settings.loop);
+  state.abStart = null; // player.load() dropped the previous file's range
+  renderMirror();
   els.dropzone.hidden = true;
   els.mediaCard.hidden = false;
   els.mediaCard.classList.toggle('audio-only', entry.kind === 'audio');
@@ -768,6 +799,41 @@ function toggleLoop() {
   if (exportLocked()) return;
   player.setLoop(!player.loop);
 }
+/**
+ * A-B range loop, one button: first press marks A at the current position,
+ * second press marks B and starts looping from A, third press clears it.
+ * Pressing B before A swaps them; a range under 0.2 s keeps waiting for B.
+ */
+function cycleRange() {
+  if (exportLocked() || !state.current) return;
+  if (player.range) {
+    player.setRange(null);
+    state.abStart = null;
+  } else if (state.abStart == null) {
+    state.abStart = player.currentTime;
+  } else if (player.setRange(state.abStart, player.currentTime)) {
+    state.abStart = null;
+    player.seek(player.range.a);
+  }
+  render();
+}
+if (els.abBtn) els.abBtn.addEventListener('click', cycleRange);
+
+/** 镜像: flips the picture left-right in the practice room only (exports are not flipped). */
+function renderMirror() {
+  const video = !!state.current && state.current.kind === 'video';
+  if (els.video && els.video.classList) els.video.classList.toggle('mirror', video && settings.mirror);
+  if (!els.mirrorBtn) return;
+  els.mirrorBtn.hidden = !video;
+  els.mirrorBtn.setAttribute('aria-pressed', String(settings.mirror));
+}
+function toggleMirror() {
+  if (exportLocked() || !state.current || state.current.kind !== 'video') return;
+  settings.mirror = !settings.mirror;
+  saveSettings();
+  renderMirror();
+}
+if (els.mirrorBtn) els.mirrorBtn.addEventListener('click', toggleMirror);
 els.speedBtn.addEventListener('click', cycleSpeed);
 els.loopBtn.addEventListener('click', toggleLoop);
 
@@ -1167,6 +1233,10 @@ window.addEventListener('keydown', (e) => {
     selectStem(STEMS[Number(e.key) - 1].id);
   } else if (e.key === 'l' || e.key === 'L') {
     player.setLoop(!player.loop);
+  } else if (e.key === 'b' || e.key === 'B') {
+    cycleRange();
+  } else if (e.key === 'm' || e.key === 'M') {
+    toggleMirror();
   }
 });
 

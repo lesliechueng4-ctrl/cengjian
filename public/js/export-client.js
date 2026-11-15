@@ -559,7 +559,9 @@ export function recordingPercent(t, d) {
  * @param {string} selected  Selected_Stem at the moment recording starts
  */
 export function capturePlaybackState(player, selected) {
-  return { time: player.currentTime, rate: player.rate, playing: !player.paused, loop: player.loop, selected };
+  const state = { time: player.currentTime, rate: player.rate, playing: !player.paused, loop: player.loop, selected };
+  if (player.range) state.range = { a: player.range.a, b: player.range.b }; // A-B loop, put back after recording
+  return state;
 }
 
 /**
@@ -573,6 +575,7 @@ export async function restorePlaybackState(player, saved) {
   const step = (fn) => { try { fn(); } catch { /* keep restoring */ } };
   step(() => player.setRate(saved.rate));
   step(() => player.setLoop(saved.loop));
+  if (saved.range) step(() => player.setRange(saved.range.a, saved.range.b));
   step(() => player.select(saved.selected));
   step(() => player.seek(saved.time));
   try {
@@ -689,6 +692,7 @@ export async function runBrowserRecording({
     player.pause();
     player.select(stemId);
     player.setLoop(false);
+    if (typeof player.setRange === 'function') player.setRange(null); // record the whole file, not the A-B range
     player.setRate(1);
     player.seek(0);
     recAudio.currentTime = 0;

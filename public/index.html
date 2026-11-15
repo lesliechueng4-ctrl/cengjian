@@ -105,6 +105,7 @@
               <div class="controls">
                 <div class="progress" id="progress" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
                   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+                  <div class="progress-range" id="progressRange" hidden></div>
                   <div class="progress-thumb" id="progressThumb"></div>
                 </div>
                 <div class="controls-row">
@@ -118,6 +119,8 @@
                     <button class="icon-btn" id="loopBtn" type="button" aria-label="循环播放" aria-pressed="false">
                       <svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
+                    <button type="button" class="vis-toggle" id="abBtn" aria-pressed="false" title="A-B 区间循环：点一下定起点，再点一下定终点，第三下取消（快捷键 B）">设 A 点</button>
+                    <button type="button" class="vis-toggle" id="mirrorBtn" aria-pressed="false" title="左右翻转画面，像照镜子一样跟着学（快捷键 M）" hidden>镜像</button>
                     <button type="button" class="vis-toggle" id="visToggle" aria-pressed="false" disabled>可视化</button>
                     <button type="button" class="vis-toggle" id="beatShift" title="拍号标得不对时点这里：把第 1 拍往后挪一拍" hidden>第 1 拍 →</button>
                   </div>
@@ -162,7 +165,7 @@
               <span class="time" id="timeBottom">00:00 / 00:00</span>
             </div>
             <p class="footnote">画面与音乐同步 · 变速保持音高</p>
-            <p class="shortcuts desktop-only">快捷键：空格 播放/暂停 · ← → 快退/快进 5 秒 · 1 到 9 切换音轨 · L 循环</p>
+            <p class="shortcuts desktop-only">快捷键：空格 播放/暂停 · ← → 快退/快进 5 秒 · 1 到 9 切换音轨 · L 循环 · B 区间循环 · M 镜像</p>
           </div>
         </div>
       </section>
