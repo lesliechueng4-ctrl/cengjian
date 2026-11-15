@@ -1,7 +1,7 @@
 {
-  "name": "cengjian",
+  "name": "chaipai",
   "version": "1.0.0",
-  "description": "层间 · 音乐练习：上传视频或音频，分离音轨，变速保持音高，循环练舞",
+  "description": "拆拍 · 音乐练习：上传视频或音频，分离音轨，变速保持音高，循环练舞",
   "type": "module",
   "private": true,
   "scripts": {

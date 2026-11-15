@@ -31,7 +31,7 @@ test('static server', async (t) => {
     const res = await request(port, '/');
     assert.equal(res.status, 200);
     assert.match(res.headers['content-type'], /^text\/html/);
-    assert.ok(res.body.includes('层间'));
+    assert.ok(res.body.includes('拆拍'));
     for (const s of ['音乐练习', '上传视频或音频', '练习室', '真实分析', '暂停', '+ 上传视频',
       '画面与音乐同步 · 变速保持音高', '首页', '音乐台', '我的']) {
       assert.ok(res.body.includes(s), `missing ${s}`);
