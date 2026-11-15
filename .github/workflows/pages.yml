@@ -1,0 +1,38 @@
+# Publishes the online version: the contents of public/ as a static site on
+# GitHub Pages. The page then runs without the Node server, so separation is
+# done in the browser and video export uses browser recording.
+#
+# One-time setup in the repository: Settings -> Pages -> Source: "GitHub Actions".
+name: Deploy online version
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -42,7 +42,41 @@
   | M | 开关镜像（仅视频文件） |
   | Esc | 关闭“真实分析”面板 |
 
-## 运行方式
+## 三种用法
+
+| 用法 | 适合谁 | 要装什么 | 音轨分离 | 视频导出 |
+| --- | --- | --- | --- | --- |
+| **在线版** | 想马上试一下的人 | 什么都不用装，打开网址 | 浏览器算法 | 浏览器录制（和歌一样长的时间） |
+| **Windows 免安装包** | 常用、不想折腾的人 | 解压，双击 `start.bat` | 浏览器算法；电脑上另装了 Demucs 时用 AI | 浏览器录制；另装了 FFmpeg 时更快 |
+| **源码运行** | 想要最好效果或想改代码的人 | Node.js，可选 Demucs 和 FFmpeg | 同上 | 同上 |
+
+三种用法里你的文件都只在自己的设备上处理。在线版只是把网页文件放在网上，打开之后分离、播放、保存全在你的浏览器里完成，文件不会传到任何服务器。
+
+### 在线版
+
+仓库的 `main` 分支每次更新 `public/` 后，GitHub Actions（`.github/workflows/pages.yml`）会把 `public/` 发布到 GitHub Pages。
+
+- 第一次要在仓库里打开一次：Settings → Pages → Source 选 “GitHub Actions”。之后每次推送自动更新。
+- 地址是 `https://<用户名>.github.io/<仓库名>/`。
+- 在线版没有本地服务器，所以没有 Demucs AI 分离和 FFmpeg 导出：分离用浏览器算法，“我的”里会提示“服务器未安装 Demucs”，导出视频走浏览器录制。其余功能（可视化、变速、A-B 循环、镜像、音乐台保存）都一样。
+- 手机上也能直接打开，可以“添加到主屏幕”。
+
+### Windows 免安装包
+
+给不想装任何东西的人。压缩包约 33 MB，里面带了运行环境（Node.js）。
+
+- **使用**：解压整个文件夹，双击 `start.bat`，浏览器会自动打开。用完关掉黑色窗口。详细说明在包里的 `README.txt`。
+- **制作**（在 Windows 上）：
+
+  ```bash
+  npm run build:win
+  ```
+
+  生成 `dist/chaipai-win-x64/` 文件夹和 `dist/chaipai-win-x64-v<版本号>.zip`。包里的 Node.js 就是你运行这条命令时用的那个。只想要文件夹不要压缩包：`node scripts/build-win.mjs --no-zip`。
+- **发布**：把 zip 传到 GitHub 仓库的 Releases 页面（Draft a new release → 把 zip 拖进去 → Publish），别人就能从那里下载。
+- 包里不含 Demucs 和 FFmpeg。对方电脑上如果装了，启动时会自动检测并使用。
+
+## 运行方式（源码）
 
 需要 Node.js 18 或更高版本。不需要 `npm install`。
 
@@ -369,6 +403,7 @@ npm test
 - `player.test.mjs`：同步播放器（用假的媒体元素）。切换音轨不丢位置且无空白、变速保持音高、漂移校正、循环、A-B 区间循环（到 B 点跳回 A、太短或非法的区间不生效、换文件后清空）。
 - `library.test.mjs`：音乐台缓存按最近使用顺序释放旧的分离结果并回收 Blob URL，手机和电脑数量不同；读取媒体元数据时长（含出错、超时、取消）。
 - `store.test.mjs`：保存到浏览器的那一层（用内存里模拟的 IndexedDB）。文件按最近使用排序、只改指定字段、分离结果和可视化数据的存取、删除文件时连分离结果一起删、写入失败时报错、没有 IndexedDB 时不保存；超出数量时先丢最久没用的且不丢正在用的（含属性测试）。
+- `build-win.test.mjs`：Windows 免安装包。启动脚本用 CRLF 换行、只用包里自带的 Node、不含本机路径；打包结果的目录结构、不带测试残留文件、重复打包会先清空、非 Windows 上给出提示。
 - `wav.test.mjs`：WAV 编码，以及读取 Demucs 输出用的 WAV 解码（编解码往返、各种不支持或不完整的文件）。
 - `server.test.mjs`：静态服务器（MIME 类型、路径穿越拦截、404），接入 Demucs 服务后静态行为不变，`package.json` 没有依赖。
 - `helpers.test.mjs`：测试辅助工具本身（SDR 计算、合成测试集、属性测试的种子复现）。
