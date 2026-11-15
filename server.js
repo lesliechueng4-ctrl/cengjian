@@ -1,4 +1,4 @@
-// Zero-dependency static server for 层间 · 音乐练习.
+// Zero-dependency static server for 拆拍 · 音乐练习.
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -103,7 +103,7 @@ if (isMain) {
   const demucs = createDemucsService({ ...readConfig(), tempRoot: defaultTempRoot() });
   const exporter = createExportService({ ...readExportConfig(), tempRoot: defaultExportTempRoot() });
   createServer(ROOT, { demucs, exporter }).listen(port, host, () => {
-    console.log('层间 · 音乐练习 已启动');
+    console.log('拆拍 · 音乐练习 已启动');
     console.log(`  电脑访问:  http://localhost:${port}`);
     for (const ip of lanAddresses()) console.log(`  手机访问:  http://${ip}:${port}  (同一 Wi-Fi 下)`);
     // Clears the temp dir and probes Demucs; prints one "AI 分离" line after the banner.
