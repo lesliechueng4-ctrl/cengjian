@@ -12,7 +12,8 @@ import {
   runBrowserRecording, exportVideoWithFallback, visFileLabel,
 } from './export-client.js';
 import { canBrowserVisRecord, createVisCompositor } from './vis-record.js';
-import { encodeVisPayload, shiftBeat } from './vis-data.js';
+import { encodeVisPayload, shiftBeat, VIS_VERSION } from './vis-data.js';
+import { openStore, newKey, keysToPrune, STORED_FILE_LIMIT, STORED_STEM_LIMITS } from './store.js';
 import { createLiveVisualizer, readVisSettings } from './visualizer.js';
 import { computeVisData } from './vis-compute.js';
 import {
@@ -327,6 +328,7 @@ function startVisCompute(entry) {
     if (state.vis.abort !== abort || abort.signal.aborted) return;
     if (state.current === entry && entry.cache && entry.cache === cache) {
       entry.cache.vis = data;
+      saveVis(entry);
       state.vis = { status: 'ready', abort: null };
     } else {
       state.vis = { status: 'idle', abort: null };
@@ -384,6 +386,7 @@ function shiftBeatOne() {
   const data = currentVisData();
   if (!entry || !entry.cache || !data || !data.beat) return;
   entry.cache.vis = shiftBeat(data, 1);
+  saveVis(entry);
   invalidateVis();
 }
 if (els.beatShift) els.beatShift.addEventListener('click', shiftBeatOne);
@@ -405,6 +408,7 @@ function render() {
   // Files that skip decoding (too large, undecodable) still get a duration in 音乐台.
   if (loaded && !state.current.duration && d) {
     state.current.duration = d;
+    saveFilePatch(state.current, { duration: d });
     renderLibrary();
   }
   const t = scrubbing != null ? scrubbing * d : player.currentTime;
@@ -544,6 +548,123 @@ const isMobile = () => !!(window.matchMedia && window.matchMedia('(pointer: coar
 // and older ones are dropped before a new separation starts.
 let useCounter = 0;
 
+// ---------------------------------------------------------------------------
+// Kept across reloads (store.js): files, separated stems, Vis_Data, A-B range
+// ---------------------------------------------------------------------------
+
+// Saving is best effort. Without IndexedDB (or when it refuses: private mode,
+// quota) `store` stays null or a write fails, and the app works as before:
+// everything lives until the page is reloaded.
+let store = null;
+const storeReady = openStore().then((s) => { store = s; return s; }, () => null);
+const warnSave = (err) => console.warn('音乐台没有保存成功', err);
+const saved = (promise) => { if (promise && promise.catch) promise.catch(warnSave); };
+
+function saveFilePatch(entry, changes) {
+  if (store && entry && entry.key) saved(store.patchFile(entry.key, changes));
+}
+
+/** Stores a newly added file, then forgets the least recently used ones beyond STORED_FILE_LIMIT. */
+function saveNewFile(entry) {
+  storeReady.then((s) => {
+    if (!s || !entry.key) return;
+    saved(s.putFile({ key: entry.key, name: entry.name, kind: entry.kind, duration: entry.duration || 0, file: entry.file, usedAt: entry.usedAt }));
+    const keep = state.current && state.current.key ? state.current.key : entry.key;
+    for (const key of keysToPrune(state.entries.filter((e) => e.key), STORED_FILE_LIMIT, keep)) {
+      if (key === entry.key) continue;
+      const old = state.entries.find((e) => e.key === key);
+      if (old) { old.key = null; old.hasStems = false; } // stays in this session's list only
+      saved(s.deleteFile(key));
+    }
+    renderLibrary();
+  });
+}
+
+/** Writes the entry's separated stems to disk and drops the stored stems of older files. */
+async function saveStems(entry) {
+  if (!store || !entry.key || !entry.cache) return;
+  const cache = entry.cache;
+  try {
+    const blobs = {};
+    for (const [id, url] of Object.entries(cache.urls)) blobs[id] = await fetch(url).then((r) => r.blob());
+    if (entry.cache !== cache || !entry.key) return;
+    const vis = cache.vis || null;
+    await store.putStems({ key: entry.key, blobs, analysis: cache.analysis, vis });
+    entry.hasStems = true;
+    if ((cache.vis || null) !== vis) saveVis(entry); // Vis_Data arrived while the stems were being written
+    const limit = isMobile() ? STORED_STEM_LIMITS.mobile : STORED_STEM_LIMITS.desktop;
+    for (const key of keysToPrune(state.entries.filter((e) => e.key && e.hasStems), limit, entry.key)) {
+      const old = state.entries.find((e) => e.key === key);
+      if (old) old.hasStems = false;
+      await store.deleteStems(key);
+    }
+    renderLibrary();
+  } catch (err) {
+    warnSave(err);
+  }
+}
+
+/** Vis_Data (with the 第 1 拍 correction) is kept next to the stored stems. */
+function saveVis(entry) {
+  if (store && entry.key && entry.hasStems && entry.cache) saved(store.patchStems(entry.key, { vis: entry.cache.vis || null }));
+}
+
+/** Reads the stored stems back into `entry.cache`. Leaves the entry without a cache when there is nothing usable. */
+async function restoreStems(entry) {
+  if (!store || !entry.key || !entry.hasStems || entry.cache) return;
+  try {
+    const rec = await store.getStems(entry.key);
+    if (entry.cache) return;
+    const ids = rec && rec.blobs ? Object.keys(rec.blobs) : [];
+    if (!ids.length || !rec.analysis) { entry.hasStems = false; return; }
+    const urls = {};
+    for (const id of ids) urls[id] = URL.createObjectURL(rec.blobs[id]);
+    entry.cache = { urls, analysis: rec.analysis };
+    if (rec.vis && rec.vis.version === VIS_VERSION && rec.vis.stems) entry.cache.vis = rec.vis;
+  } catch (err) {
+    warnSave(err);
+  }
+}
+
+/** On page load: fills 音乐台 from disk and reopens the last file when its stems are stored. */
+async function restoreLibrary() {
+  const s = await storeReady;
+  if (!s) return;
+  try {
+    const [files, stemKeys] = await Promise.all([s.listFiles(), s.stemKeys()]);
+    const withStems = new Set(stemKeys);
+    const known = new Set(state.entries.map((e) => e.key));
+    const restored = [];
+    for (const f of files) {
+      if (!f || !f.key || !f.file || known.has(f.key)) continue;
+      restored.push({
+        id: state.nextId++, key: f.key, file: f.file, name: f.name || '未命名',
+        kind: f.kind === 'video' ? 'video' : 'audio', duration: f.duration || 0,
+        usedAt: f.usedAt || 0, range: f.range || null, hasStems: withStems.has(f.key),
+      });
+      withStems.delete(f.key);
+    }
+    for (const orphan of withStems) if (!known.has(orphan)) saved(s.deleteStems(orphan));
+    state.entries.push(...restored);
+    renderLibrary();
+    if (!state.current && restored[0] && restored[0].hasStems) openEntry(restored[0]);
+  } catch (err) {
+    warnSave(err);
+  }
+}
+
+/** 音乐台 删除: forgets a file that is not open, here and on disk. */
+function removeEntry(entry) {
+  if (entry === state.current) return;
+  const i = state.entries.indexOf(entry);
+  if (i < 0) return;
+  state.entries.splice(i, 1);
+  if (entry.cache) { revokeUrls(entry.cache.urls); entry.cache = null; }
+  if (store && entry.key) saved(store.deleteFile(entry.key));
+  renderLibrary();
+}
+let openToken = 0;
+
 function revokeUrls(urls) {
   for (const u of Object.values(urls || {})) URL.revokeObjectURL(u);
 }
@@ -575,6 +696,7 @@ async function separateEntry(entry, { signal, stillCurrent, mobile, metaDuration
     }
     if (!stillCurrent()) return null;
     entry.duration = audioBuffer.duration;
+    saveFilePatch(entry, { duration: entry.duration });
     state.analysis = {
       duration: audioBuffer.duration,
       sampleRate: audioBuffer.sampleRate,
@@ -656,10 +778,18 @@ async function openEntry(entry) {
   }
   state.exportNotice = ex ? '已取消导出' : '';
   state.exportUnsupported = false;
+  // Stems kept from an earlier visit are read back before the file opens, so it is ready at once.
+  const token = ++openToken;
+  if (!entry.cache && entry.hasStems) {
+    await restoreStems(entry);
+    if (token !== openToken) return;
+  }
   if (state.abort) state.abort.abort();
   stopVisCompute(); // the previous file's Vis_Data computation (2.3)
   state.current = entry;
   entry.lastUsed = ++useCounter;
+  entry.usedAt = Date.now();
+  saveFilePatch(entry, { usedAt: entry.usedAt });
   state.stemsReady = false;
   state.separating = !entry.cache;
   state.progress = entry.cache ? 1 : 0;
@@ -673,6 +803,7 @@ async function openEntry(entry) {
   player.setRate(settings.speed);
   player.setLoop(settings.loop);
   state.abStart = null; // player.load() dropped the previous file's range
+  if (entry.range) player.setRange(entry.range.a, entry.range.b); // the A-B range this file had last time
   renderMirror();
   els.dropzone.hidden = true;
   els.mediaCard.hidden = false;
@@ -721,6 +852,7 @@ async function openEntry(entry) {
     entry.cache = { urls: out.urls, analysis: out.analysis };
     if (!entry.duration && out.analysis.duration) {
       entry.duration = out.analysis.duration;
+      saveFilePatch(entry, { duration: entry.duration });
       renderLibrary();
     }
     state.stemsReady = true;
@@ -728,6 +860,7 @@ async function openEntry(entry) {
     state.progressText = '';
     state.progress = 1;
     startVisCompute(entry); // separation finished (1.1)
+    saveStems(entry);
   } catch (err) {
     if (err && err.name === 'AbortError') return;
     if (!stillCurrent()) return;
@@ -742,8 +875,9 @@ async function openEntry(entry) {
 
 function addFile(file) {
   if (!file) return;
-  const entry = { id: state.nextId++, file, name: file.name, kind: kindOf(file), duration: 0 };
+  const entry = { id: state.nextId++, key: newKey(), file, name: file.name, kind: kindOf(file), duration: 0, usedAt: Date.now() };
   state.entries.unshift(entry);
+  saveNewFile(entry);
   showView('practice');
   openEntry(entry);
 }
@@ -814,6 +948,12 @@ function cycleRange() {
   } else if (player.setRange(state.abStart, player.currentTime)) {
     state.abStart = null;
     player.seek(player.range.a);
+  }
+  const entry = state.current;
+  const range = player.range ? { a: player.range.a, b: player.range.b } : null;
+  if ((entry.range || null) !== range && (entry.range || range)) {
+    entry.range = range;
+    saveFilePatch(entry, { range });
   }
   render();
 }
@@ -1278,7 +1418,7 @@ function renderLibrary() {
     name.textContent = entry.name;
     const meta = document.createElement('span');
     meta.className = 'library-meta';
-    meta.textContent = `${entry.kind === 'video' ? '视频' : '音频'} · ${entry.duration ? formatTime(entry.duration) : '读取中'}${entry === state.current ? ' · 正在练习' : ''}`;
+    meta.textContent = `${entry.kind === 'video' ? '视频' : '音频'} · ${entry.duration ? formatTime(entry.duration) : '读取中'}${entry === state.current ? ' · 正在练习' : ''}${entry.cache || entry.hasStems ? ' · 已分离' : ''}`;
     text.append(name, meta);
     btn.append(icon, text);
     btn.addEventListener('click', () => {
@@ -1286,6 +1426,15 @@ function renderLibrary() {
       if (entry !== state.current) openEntry(entry);
     });
     li.append(btn);
+    if (entry !== state.current) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'library-remove';
+      del.textContent = '删除';
+      del.setAttribute('aria-label', `从音乐台删除 ${entry.name}`);
+      del.addEventListener('click', () => removeEntry(entry));
+      li.append(del);
+    }
     els.libraryList.append(li);
   }
 }
@@ -1395,3 +1544,4 @@ renderStems();
 renderLibrary();
 render();
 renderVis();
+restoreLibrary();

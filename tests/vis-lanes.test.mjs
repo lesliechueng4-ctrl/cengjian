@@ -334,6 +334,11 @@ test('beat lines: one per beat in the window, every 4th is a bar line with numbe
     const { past, future, px, playheadX } = windowOf(opts);
     const { period, phase } = vd.beat;
     const shapes = lanesAt(t, vd, opts);
+    // 没有任何行可画时（例如只有选中时才出现的效果音，又没选中）整条时间线为空，也没有拍线
+    if (laneLayout(vd, opts.selected, opts.height).length === 0) {
+      assert.equal(shapes.length, 0);
+      return;
+    }
     const lines = shapes.filter((s) => s.layer === 'beat' && s.kind === 'rect');
     const want = [];
     for (let n = Math.ceil((t - past - phase) / period); n <= Math.floor((t + future - phase) / period); n++) {
