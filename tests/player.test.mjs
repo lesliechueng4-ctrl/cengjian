@@ -232,3 +232,70 @@ test('loading a new file detaches stems without revoking caller-owned URLs', () 
     URL.revokeObjectURL = orig;
   }
 });
+
+test('A-B range: playback jumps back to A at B, with or without whole-song loop', async () => {
+  const { video, player, tick } = setup();
+  player.select('vocal');
+  assert.equal(player.setRange(30, 20), true, 'either order');
+  assert.deepEqual(player.range, { a: 20, b: 30 });
+  await player.play();
+  video.currentTime = 25;
+  player.stems.vocal.currentTime = 25;
+  tick();
+  assert.equal(video.currentTime, 25, 'inside the range nothing happens');
+  video.currentTime = 30.01;
+  tick();
+  assert.equal(video.currentTime, 20);
+  assert.equal(player.stems.vocal.currentTime, 20);
+
+  video.currentTime = 10; // before A: plays into the range
+  tick();
+  assert.equal(video.currentTime, 10);
+
+  player.setLoop(true);
+  video.currentTime = 31;
+  tick();
+  assert.equal(video.currentTime, 20, 'the range wins over the whole-song loop');
+});
+
+test('A-B range: too short or invalid ranges are refused; B is kept away from the very end', () => {
+  const { player } = setup();
+  assert.equal(player.setRange(10, 10.1), false);
+  assert.equal(player.setRange(NaN, 5), false);
+  assert.equal(player.range, null);
+  assert.equal(player.setRange(100, 500), true);
+  assert.ok(player.range.b < 120 && player.range.b > 119.9);
+  assert.equal(player.range.a, 100);
+});
+
+test('A-B range: cleared by setRange(null) and by loading another file; ended restarts at A', async () => {
+  const { video, player, tick } = setup();
+  player.setRange(20, 30);
+  await player.play();
+  video.dispatchEvent(new Event('ended'));
+  assert.equal(video.currentTime, 20);
+
+  player.setRange(null);
+  assert.equal(player.range, null);
+  video.currentTime = 40;
+  tick();
+  assert.equal(video.currentTime, 40);
+
+  player.setRange(20, 30);
+  player.load(new Blob(['y']), 'video');
+  assert.equal(player.range, null);
+});
+
+test('A-B range: a timeupdate event also wraps at B (background tabs get no animation frames)', async () => {
+  const { video, player } = setup();
+  player.setRange(20, 30);
+  await player.play();
+  video.currentTime = 30.2;
+  video.dispatchEvent(new Event('timeupdate'));
+  assert.equal(video.currentTime, 20);
+
+  player.pause();
+  video.currentTime = 40; // paused past B (e.g. scrubbed there): stays until playback resumes
+  video.dispatchEvent(new Event('timeupdate'));
+  assert.equal(video.currentTime, 40);
+});
