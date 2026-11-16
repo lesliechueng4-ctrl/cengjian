@@ -7,15 +7,15 @@
 import { decodeWav } from './wav.js';
 import { mapDemucsStems, STEM_SOURCES } from './stem-mapper.js';
 
-export const DEFAULT_DEMUCS_MODEL = 'htdemucs';
-export const DEMUCS_MODELS = Object.freeze(['htdemucs', 'htdemucs_6s']);
+export const DEFAULT_DEMUCS_MODEL = 'htdemucs_ft';
+export const DEMUCS_MODELS = Object.freeze(['htdemucs_ft', 'htdemucs', 'htdemucs_6s']);
 export const API = '/api/separate';
 
 /**
- * Any value that is not an allowed model name becomes `htdemucs`
+ * Any value that is not an allowed model name becomes the default model
  * (Requirements 7.2, 7.4).
  * @param {unknown} v
- * @returns {'htdemucs'|'htdemucs_6s'}
+ * @returns {'htdemucs_ft'|'htdemucs'|'htdemucs_6s'}
  */
 export function sanitizeDemucsModel(v) {
   return typeof v === 'string' && DEMUCS_MODELS.includes(v) ? v : DEFAULT_DEMUCS_MODEL;

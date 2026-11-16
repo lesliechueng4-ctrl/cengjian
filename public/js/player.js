@@ -16,7 +16,37 @@ export const DRIFT = {
   nudgeStop: 0.01, // back to the exact rate below this drift
   nudge: 0.05, // relative rate change while nudging (5%)
   seekCooldownMs: 400,
+  // A seek is not instant: on phones the stem comes back a few tenths of a second late,
+  // which is past seekLimit again, so re-seeking never ends and each seek is a gap of
+  // silence (measured on an iPhone: about two seeks a second, forever). After stormSeeks
+  // seeks that each came within stormMs of the one before, the player goes gentle for
+  // good (iPhones and iPads start that way): the stem is the clock, nothing touches it
+  // while it plays, and the muted picture follows it instead. Changing the stem's rate
+  // is no way out there either (measured: every rate change stalls the sound for about
+  // 0.7 s). What the muted picture can do, also measured on an iPhone: playing slower
+  // works, playing faster does not (asked for 1.25x, it ran at 1.01x). So a picture that
+  // is ahead waits. A jump of the picture is a visible freeze, so it is the last resort:
+  // only for a picture clearly behind (or far ahead), aimed a little ahead of the sound
+  // because it lands late, and never twice within gentleCooldownMs. (An earlier version
+  // jumped for small gaps and aimed further each time; on the phone that became a jump
+  // every three seconds.)
+  stormMs: 1500,
+  stormSeeks: 3,
+  gentleCooldownMs: 6000, // between two jumps of the picture
+  followStart: 0.08, // seconds the picture is ahead before it starts waiting
+  followStop: 0.05, // ... and where it stops; the change of rate itself costs it a few hundredths
+  followSlow: 0.08, // the picture runs this much slower for a small gap
+  followFast: 0.25, // ... and this much for a gap above seekLimit
+  pictureBehind: 0.3, // seconds; a picture later than this jumps (a smaller lag is left alone)
+  pictureAhead: 2, // seconds; a picture further ahead than this jumps back instead of waiting
+  pictureLead: 0.3, // seconds ahead of the sound a jump aims for
 };
+
+function isAppleTouch() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent || '')
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad asking for desktop sites
+}
 const SEEK_SYNC_LIMIT = 0.08;
 // A-B range loop: shortest allowed range, and how far before the natural end B may sit
 // (the same margin the whole-song loop uses, so the stem never runs out first).
@@ -31,9 +61,9 @@ function keepPitch(el) {
 
 export class SyncPlayer {
   /**
-   * @param {{video: HTMLVideoElement, audio: HTMLAudioElement, onUpdate?: () => void}} opts
+   * @param {{video: HTMLVideoElement, audio: HTMLAudioElement, onUpdate?: () => void, gentle?: boolean}} opts
    */
-  constructor({ video, audio, onUpdate }) {
+  constructor({ video, audio, onUpdate, gentle = isAppleTouch() }) {
     this.video = video;
     this.audio = audio;
     this.onUpdate = onUpdate || (() => {});
@@ -45,6 +75,9 @@ export class SyncPlayer {
     this.range = null; // { a, b } in seconds while an A-B range loops
     this.url = null;
     this.lastCorrection = -Infinity;
+    this.gentle = !!gentle; // see DRIFT.stormMs
+    this.follow = 0; // gentle mode: relative rate change applied to the master (0 = exact rate)
+    this.storm = 0; // hard seeks in a row that came soon after the previous one
     this.switchToken = 0;
     this.nudge = 0; // -1 slowing the stem, 0 exact rate, 1 speeding it up
     [video, audio].forEach((el) => {
@@ -110,6 +143,7 @@ export class SyncPlayer {
       el.load();
     }
     this.nudge = 0;
+    this.setFollow(this.master, 0);
     this.stems = {};
     if (this.master) this.master.muted = false;
     this.activeId = 'original';
@@ -137,6 +171,7 @@ export class SyncPlayer {
     const next = this.activeStem();
     if (prev && this.nudge) prev.playbackRate = this.rate;
     this.nudge = 0;
+    this.setFollow(this.master, 0);
     if (!next) {
       this.master.muted = false;
       if (prev) { prev.muted = true; prev.pause(); }
@@ -144,7 +179,8 @@ export class SyncPlayer {
       return;
     }
     next.playbackRate = this.rate;
-    next.currentTime = this.master.currentTime;
+    // Gentle mode: the stem that was sounding is the clock, the picture may be a little off it.
+    next.currentTime = (this.gentle && prev && !prev.paused ? prev : this.master).currentTime;
     next.muted = false;
     // Keep the previous sound until the new stem is actually playing, so switching is gapless.
     const finish = () => {
@@ -164,7 +200,7 @@ export class SyncPlayer {
   async play() {
     if (!this.master) return;
     const stem = this.activeStem();
-    if (stem) stem.currentTime = this.master.currentTime;
+    if (stem) this.alignStem(stem);
     const jobs = [this.master.play()];
     if (stem) jobs.push(stem.play());
     try { await Promise.all(jobs); } catch { /* autoplay refusal: wait for the next tap */ }
@@ -177,6 +213,19 @@ export class SyncPlayer {
     const stem = this.activeStem();
     if (stem) stem.pause();
     this.onUpdate();
+  }
+
+  /** Before starting: put the stem where the master is. Gentle mode skips a small gap (a seek is a hiccup there). */
+  alignStem(stem) {
+    const t = this.master.currentTime;
+    if (!this.gentle || Math.abs(stem.currentTime - t) > DRIFT.seekLimit) stem.currentTime = t;
+  }
+
+  /** The position that counts for looping: the sound's, where the picture only follows it. */
+  clock() {
+    const stem = this.activeStem();
+    if (this.gentle && stem && !stem.paused && !stem.seeking && !stem.ended) return stem.currentTime;
+    return this.master.currentTime;
   }
 
   toggle() {
@@ -198,6 +247,7 @@ export class SyncPlayer {
   setRate(rate) {
     this.rate = rate;
     this.nudge = 0;
+    this.follow = 0;
     const els = [this.video, this.audio, ...Object.values(this.stems)];
     for (const el of els) { el.playbackRate = rate; el.defaultPlaybackRate = rate; keepPitch(el); }
     this.onUpdate();
@@ -233,7 +283,7 @@ export class SyncPlayer {
   /** Jumps back to A once playback has reached B. Returns true if it jumped. */
   wrapRange() {
     const r = this.range;
-    if (!r || !this.master || this.master.currentTime < r.b) return false;
+    if (!r || !this.master || this.clock() < r.b) return false;
     this.seek(r.a);
     return true;
   }
@@ -242,7 +292,7 @@ export class SyncPlayer {
     if (el !== this.master) return;
     const stem = this.activeStem();
     if (stem && stem.paused) {
-      stem.currentTime = el.currentTime;
+      this.alignStem(stem);
       stem.play().catch(() => {});
     }
     this.onUpdate();
@@ -257,6 +307,9 @@ export class SyncPlayer {
 
   handleSeeked(el) {
     if (el !== this.master) return;
+    // Gentle mode, playing: seek() has already moved the stem, and a jump of the picture
+    // alone (followStem) must not drag the sound along.
+    if (this.gentle && !el.paused) return;
     const stem = this.activeStem();
     if (stem && Math.abs(stem.currentTime - el.currentTime) > SEEK_SYNC_LIMIT) stem.currentTime = el.currentTime;
   }
@@ -280,7 +333,7 @@ export class SyncPlayer {
     const d = this.duration;
     if (this.wrapRange()) return;
     // Loop slightly before the natural end so the stem never runs out first.
-    if (this.loop && d && m.currentTime >= d - 0.06) {
+    if (this.loop && d && this.clock() >= d - 0.06) {
       this.seek(0);
       return;
     }
@@ -288,9 +341,16 @@ export class SyncPlayer {
     if (stem && !stem.seeking) {
       const drift = stem.currentTime - m.currentTime; // > 0: stem is ahead
       const abs = Math.abs(drift);
-      if (abs > DRIFT.seekLimit) {
+      if (this.gentle) {
+        this.followStem(m, stem, drift, now);
+      } else if (abs > DRIFT.seekLimit) {
         if (now - this.lastCorrection > DRIFT.seekCooldownMs) {
           this.setNudge(stem, 0);
+          if (now - this.lastCorrection < DRIFT.stormMs) {
+            if (++this.storm >= DRIFT.stormSeeks) this.gentle = true;
+          } else {
+            this.storm = 0;
+          }
           stem.currentTime = m.currentTime;
           this.lastCorrection = now;
         }
@@ -304,10 +364,38 @@ export class SyncPlayer {
     this.onUpdate();
   }
 
+  /** Gentle mode: the stem plays untouched; the muted picture is brought to it. drift > 0: the picture is behind. */
+  followStem(m, stem, drift, now) {
+    if (m.seeking) return;
+    if (drift > DRIFT.pictureBehind || drift < -DRIFT.pictureAhead) {
+      this.setFollow(m, 0);
+      if (now - this.lastCorrection < DRIFT.gentleCooldownMs) return;
+      const d = this.duration;
+      const target = stem.currentTime + DRIFT.pictureLead;
+      m.currentTime = d ? Math.max(0, Math.min(target, d - 0.1)) : target;
+      this.lastCorrection = now;
+    } else if (drift < -DRIFT.seekLimit) {
+      this.setFollow(m, -DRIFT.followFast);
+    } else if (drift < -DRIFT.followStart) {
+      // Coming down from the fast rate, stay on it until followStop: one change of rate fewer.
+      if (!this.follow) this.setFollow(m, -DRIFT.followSlow);
+    } else if (drift > -DRIFT.followStop) {
+      this.setFollow(m, 0);
+    }
+  }
+
   setNudge(stem, dir) {
     if (dir === this.nudge) return;
     this.nudge = dir;
     stem.playbackRate = this.rate * (1 + dir * DRIFT.nudge);
     keepPitch(stem);
+  }
+
+  /** Gentle mode: run the (muted) master a little faster or slower so it meets the stem. */
+  setFollow(master, f) {
+    if (f === this.follow || !master) return;
+    this.follow = f;
+    master.playbackRate = this.rate * (1 + f);
+    keepPitch(master);
   }
 }

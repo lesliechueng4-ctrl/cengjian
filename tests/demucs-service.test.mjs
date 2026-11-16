@@ -143,7 +143,7 @@ test('GET /status has all fields and safe headers', async (t) => {
   assert.deepEqual(r.body, {
     available: true,
     checking: false,
-    models: ['htdemucs', 'htdemucs_6s'],
+    models: ['htdemucs_ft', 'htdemucs', 'htdemucs_6s'],
     maxUploadBytes: 12345,
     queueLength: 0,
   });
@@ -260,8 +260,9 @@ test('hang: killed after timeoutMs and reported as failed', async (t) => {
 
 // ---------------------------------------------------------------- queue (3.1, 3.2, 3.3)
 
-test('slow x5: fifth gets 429; jobs run one at a time in FIFO order with positions', async (t) => {
-  const ctx = await setup(t, { mode: 'slow' });
+test('queue x5: fifth gets 429; jobs run one at a time in FIFO order with positions', async (t) => {
+  // 'hang', not 'slow': a slow job is done after 2 s, and on a busy machine the checks below take longer.
+  const ctx = await setup(t, { mode: 'hang' });
   const ids = [];
   const positions = [];
   for (let i = 0; i < 4; i++) {

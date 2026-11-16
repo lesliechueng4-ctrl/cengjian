@@ -49,10 +49,10 @@ const { SyncPlayer, DRIFT } = await import('../public/js/player.js');
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const STEM_URLS = { vocal: 'blob:vocal', drums: 'blob:drums', bass: 'blob:bass' };
 
-function setup(kind = 'video') {
+function setup(kind = 'video', opts = {}) {
   const video = new FakeMedia();
   const audio = new FakeMedia();
-  const player = new SyncPlayer({ video, audio });
+  const player = new SyncPlayer({ video, audio, ...opts });
   player.load(new Blob(['x']), kind);
   player.master.duration = 120;
   player.setStems(STEM_URLS);
@@ -184,6 +184,150 @@ test('large drift hard-seeks the stem at most once per cooldown', async () => {
   assert.equal(stem.currentTime, 49, 'still cooling down');
   tick(DRIFT.seekCooldownMs);
   assert.equal(stem.currentTime, 50);
+});
+
+test('a device whose seeks land late stops being re-seeked: the muted picture follows the stem instead', async () => {
+  const { video, player, tick } = setup();
+  player.select('drums');
+  await player.play();
+  const stem = player.stems.drums;
+  const DELAY = 0.3; // every seek on this device comes back 0.3 s late
+  let seeks = 0;
+  let last = stem.currentTime;
+  const step = () => {
+    tick(DRIFT.seekCooldownMs + 50);
+    if (stem.currentTime !== last) { seeks++; stem.currentTime -= DELAY; }
+    last = stem.currentTime;
+  };
+  video.currentTime = 50;
+  stem.currentTime = 49;
+  last = 49;
+  for (let i = 0; i < 20; i++) step();
+  assert.ok(seeks <= DRIFT.stormSeeks + 1, `seeked ${seeks} times`);
+  assert.equal(player.gentle, true);
+  assert.equal(stem.playbackRate, 1, 'the sound is left alone');
+  assert.ok(Math.abs(video.playbackRate - (1 - DRIFT.followFast)) < 1e-9, 'the picture waits for the late stem');
+
+  // Closing in: it stays on that rate (no extra change) until the two have met.
+  stem.currentTime = video.currentTime - 0.1;
+  tick();
+  assert.ok(Math.abs(video.playbackRate - (1 - DRIFT.followFast)) < 1e-9);
+
+  // Met: back to the exact rate. Still no change to the stem.
+  stem.currentTime = video.currentTime;
+  tick();
+  assert.equal(video.playbackRate, 1);
+  assert.equal(stem.playbackRate, 1);
+
+  // A small gap from the exact rate: a small change.
+  stem.currentTime = video.currentTime - 0.1;
+  tick();
+  assert.ok(Math.abs(video.playbackRate - (1 - DRIFT.followSlow)) < 1e-9, 'small gap: small change');
+  stem.currentTime = video.currentTime;
+  tick();
+  assert.equal(video.playbackRate, 1);
+
+  // The picture a little late is left alone: it is never sped up.
+  stem.currentTime = video.currentTime + 0.1;
+  tick(DRIFT.gentleCooldownMs + 1);
+  assert.equal(video.playbackRate, 1);
+  assert.equal(video.currentTime, stem.currentTime - 0.1);
+
+  // Back to 原曲 while following: the master plays at the exact rate again.
+  stem.currentTime = video.currentTime - 0.1;
+  tick();
+  assert.notEqual(video.playbackRate, 1);
+  player.select('original');
+  assert.equal(video.playbackRate, 1);
+  player.select('drums');
+  await flush();
+  stem.currentTime = video.currentTime;
+
+  // A really large gap: the picture jumps to the sound, the sound stays where it is.
+  stem.currentTime = video.currentTime - 5;
+  const at = stem.currentTime;
+  tick(DRIFT.gentleCooldownMs + 1);
+  assert.equal(stem.currentTime, at);
+  assert.ok(Math.abs(video.currentTime - (at + DRIFT.pictureLead)) < 1e-9);
+});
+
+test('gentle from the start (iPhone): the sound is never seeked or re-timed while it plays', async () => {
+  const { video, player, tick } = setup('video', { gentle: true });
+  player.select('drums');
+  await player.play();
+  const stem = player.stems.drums;
+  video.currentTime = 50;
+  stem.currentTime = 49.7; // came back late from the first seek
+  tick();
+  assert.equal(stem.currentTime, 49.7);
+  assert.equal(stem.playbackRate, 1);
+  assert.ok(Math.abs(video.playbackRate - (1 - DRIFT.followFast)) < 1e-9, 'the picture waits');
+
+  // The picture is late: it jumps to a little ahead of the sound, then waits for it.
+  stem.currentTime = 60;
+  video.currentTime = 59.5;
+  tick();
+  assert.equal(stem.currentTime, 60);
+  assert.ok(Math.abs(video.currentTime - (60 + DRIFT.pictureLead)) < 1e-9);
+  assert.equal(video.playbackRate, 1);
+  video.dispatchEvent(new Event('seeked'));
+  assert.equal(stem.currentTime, 60, 'a jump of the picture does not drag the sound along');
+  tick();
+  assert.ok(video.playbackRate < 1);
+
+  // It landed late and is behind again: no second jump inside the cooldown, then the same jump.
+  video.currentTime = 59.5;
+  tick(100);
+  assert.equal(video.currentTime, 59.5);
+  assert.equal(video.playbackRate, 1);
+  tick(DRIFT.gentleCooldownMs);
+  assert.ok(Math.abs(video.currentTime - (60 + DRIFT.pictureLead)) < 1e-9);
+
+  // A picture a little late is left alone for good.
+  video.currentTime = 60 - DRIFT.pictureBehind + 0.05;
+  tick(DRIFT.gentleCooldownMs * 2);
+  assert.equal(video.currentTime, 60 - DRIFT.pictureBehind + 0.05);
+  assert.equal(video.playbackRate, 1);
+
+  // Pause and play again with a small gap: the sound is not seeked.
+  player.pause();
+  video.currentTime = 70;
+  stem.currentTime = 69.9;
+  await player.play();
+  assert.equal(stem.currentTime, 69.9);
+  // Switching stems starts the new one from the sound's position.
+  player.select('bass');
+  assert.equal(player.stems.bass.currentTime, 69.9);
+});
+
+test('gentle: the A-B range wraps on the position of the sound', async () => {
+  const { video, player, tick } = setup('video', { gentle: true });
+  player.select('drums');
+  await player.play();
+  const stem = player.stems.drums;
+  assert.equal(player.setRange(10, 20), true);
+  video.currentTime = 20.1; // the picture is ahead, the sound has not reached B yet
+  stem.currentTime = 19.9;
+  tick();
+  assert.equal(stem.currentTime, 19.9);
+  stem.currentTime = 20.01;
+  tick();
+  assert.equal(stem.currentTime, 10);
+  assert.equal(video.currentTime, 10);
+});
+
+test('seeks far apart never switch a normal device to gentle mode', async () => {
+  const { video, player, tick } = setup();
+  player.select('drums');
+  await player.play();
+  const stem = player.stems.drums;
+  video.currentTime = 50;
+  for (let i = 0; i < 10; i++) {
+    stem.currentTime = 49;
+    tick(DRIFT.stormMs + 1);
+    assert.equal(stem.currentTime, 50);
+  }
+  assert.equal(player.gentle, false);
 });
 
 test('switching stems clears an active nudge', async () => {

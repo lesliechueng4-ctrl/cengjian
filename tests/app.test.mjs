@@ -202,7 +202,7 @@ class FakeWorker {
 const requests = []; // { method, url }
 let server = {}; // per-test behaviour of the fake local server
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const AVAILABLE = { available: true, checking: false, models: ['htdemucs', 'htdemucs_6s'], maxUploadBytes: 1e9, queueLength: 0 };
+const AVAILABLE = { available: true, checking: false, models: ['htdemucs_ft', 'htdemucs', 'htdemucs_6s'], maxUploadBytes: 1e9, queueLength: 0 };
 async function fakeFetch(url, init = {}) {
   const method = init.method || 'GET';
   requests.push({ method, url: String(url) });
@@ -246,9 +246,9 @@ test('Demucs: only 原曲 is playable while separating, then all 8 stems, and th
   assert.equal(derived().length, 8);
   assert.ok(stemButtons.every((b) => !b.disabled));
   assert.equal(posts().length, 1);
-  assert.match(posts()[0].url, /^\/api\/separate\?model=htdemucs&ext=wav$/);
+  assert.match(posts()[0].url, /^\/api\/separate\?model=htdemucs_ft&ext=wav$/);
   assert.equal(workerRuns.length, runsBefore, 'browser DSP not used');
-  assert.ok(sheetText().includes('Demucs AI（htdemucs）'), 'analysis.engine is demucs and the model is shown');
+  assert.ok(sheetText().includes('Demucs AI（htdemucs_ft）'), 'analysis.engine is demucs and the model is shown');
   assert.equal($('#demucsHint').hidden, true, 'hint hidden while Demucs is available');
   assert.ok(deletes().some((r) => r.url === '/api/separate/job-d'), 'server copy freed');
 });
@@ -266,7 +266,7 @@ test('status unavailable shows the hint and runs DSP; reopening the Demucs file 
   assert.ok(stemButtons.every((b) => !b.disabled));
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(posts().length, 1);
-  assert.ok(sheetText().includes('Demucs AI（htdemucs）'));
+  assert.ok(sheetText().includes('Demucs AI（htdemucs_ft）'));
 });
 
 test('a failed upload (HTTP 500) falls back to browser separation with a notice', async () => {
@@ -319,14 +319,15 @@ test('phones run DSP in fast mode and desktops in high quality mode', async () =
 
 test('changing the Demucs model saves it to localStorage', () => {
   const select = $('#demucsModel');
-  assert.equal(select.value, 'htdemucs');
+  assert.equal(select.value, 'htdemucs_ft');
   select.value = 'htdemucs_6s';
   select.dispatchEvent(new Event('change'));
   assert.equal(JSON.parse(storage.get('cengjian.settings')).demucsModel, 'htdemucs_6s');
+  assert.equal(JSON.parse(storage.get('cengjian.settings')).modelPicked, true);
   select.value = 'bogus';
   select.dispatchEvent(new Event('change'));
-  assert.equal(select.value, 'htdemucs');
-  assert.equal(JSON.parse(storage.get('cengjian.settings')).demucsModel, 'htdemucs');
+  assert.equal(select.value, 'htdemucs_ft');
+  assert.equal(JSON.parse(storage.get('cengjian.settings')).demucsModel, 'htdemucs_ft');
 });
 
 // loadSettings runs once at import and is not exported, so each run imports a
@@ -337,7 +338,7 @@ test('changing the Demucs model saves it to localStorage', () => {
 // **Validates: Requirements 7.2, 7.3, 7.4**
 test('Feature: separation-accuracy, Property 13: 模型设置的保存往返与清洗', async () => {
   const { forAll, gen } = await import('./helpers/prop.mjs');
-  const { sanitizeDemucsModel, DEMUCS_MODELS } = await import('../public/js/remote-separator.js');
+  const { sanitizeDemucsModel, DEMUCS_MODELS, DEFAULT_DEMUCS_MODEL } = await import('../public/js/remote-separator.js');
   server = { status: null }; // each import's status check answers right away
   const KEY = 'cengjian.settings';
   const modelGen = gen.oneOf(
@@ -348,7 +349,8 @@ test('Feature: separation-accuracy, Property 13: 模型设置的保存往返与�
     null, true, () => ['htdemucs'], () => ({ m: 'htdemucs' }),
   );
   const storedGen = gen.oneOf(
-    (rng) => JSON.stringify({ speed: 1, loop: false, demucsModel: modelGen(rng) }), // valid / bad model
+    (rng) => JSON.stringify({ speed: 1, loop: false, demucsModel: modelGen(rng), modelPicked: true }), // picked: valid / bad model
+    (rng) => JSON.stringify({ speed: 1, loop: false, demucsModel: modelGen(rng) }), // saved before the default changed: not a pick
     (rng) => JSON.stringify({ speed: 1, loop: true }), // missing key
     (rng) => JSON.stringify({ demucsModel: modelGen(rng) }).slice(0, -1 - gen.int(0, 5)(rng)), // corrupted
     gen.oneOf('null', '42', '"htdemucs"', '[]', '["htdemucs_6s"]', 'true', '{', ''),
@@ -358,8 +360,8 @@ test('Feature: separation-accuracy, Property 13: 模型设置的保存往返与�
   const expectedFrom = (raw) => {
     try {
       const s = JSON.parse(raw || '{}');
-      return s !== null && typeof s === 'object' ? sanitizeDemucsModel(s.demucsModel) : 'htdemucs';
-    } catch { return 'htdemucs'; }
+      return s !== null && typeof s === 'object' && s.modelPicked ? sanitizeDemucsModel(s.demucsModel) : DEFAULT_DEMUCS_MODEL;
+    } catch { return DEFAULT_DEMUCS_MODEL; }
   };
 
   let n = 0;
@@ -378,5 +380,6 @@ test('Feature: separation-accuracy, Property 13: 模型设置的保存往返与�
     const saved = sanitizeDemucsModel(picked);
     assert.equal(select.value, saved);
     assert.equal(JSON.parse(storage.get(KEY)).demucsModel, saved);
+    assert.equal(JSON.parse(storage.get(KEY)).modelPicked, true);
   }, { runs: 100 });
 });

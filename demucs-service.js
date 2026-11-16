@@ -1,6 +1,6 @@
 // Demucs_Service: optional server-side AI separation via a local Demucs install.
 // Node >= 18 built-ins only. Lives outside public/ so it is never served statically.
-import childProcess from 'node:child_process';
+import childProcess, { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,8 +15,9 @@ import {
   truncate,
 } from './server-util.js';
 
-export const DEMUCS_MODELS = ['htdemucs', 'htdemucs_6s'];
+export const DEMUCS_MODELS = ['htdemucs_ft', 'htdemucs', 'htdemucs_6s'];
 export const MODEL_STEMS = {
+  htdemucs_ft: ['vocals', 'drums', 'bass', 'other'],
   htdemucs: ['vocals', 'drums', 'bass', 'other'],
   htdemucs_6s: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
 };
@@ -320,7 +321,8 @@ export function createDemucsService(options = {}) {
 
   async function removeDir(dir, id) {
     try {
-      await fs.promises.rm(dir, { recursive: true, force: true });
+      // Retries: on Windows a process that was just killed can keep the folder busy for a moment.
+      await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch (err) {
       warn(`删除任务 ${id} 的临时目录失败：${err && err.code ? err.code : err}`);
     }
@@ -366,7 +368,7 @@ export function createDemucsService(options = {}) {
       available = ok;
       checking = false;
       log(ok
-        ? '  AI 分离:  已启用 Demucs（htdemucs / htdemucs_6s）'
+        ? '  AI 分离:  已启用 Demucs（htdemucs_ft / htdemucs / htdemucs_6s）'
         : '  AI 分离:  未检测到 Demucs，将使用浏览器分离');
     })();
     return initPromise;
@@ -403,6 +405,18 @@ export function createDemucsService(options = {}) {
     }, ms);
     if (typeof t.unref === 'function') t.unref();
     job.expireTimer = t;
+  }
+
+  /** Logs what kind of sound was uploaded (codec, channels, bitrate, length); needs ffprobe, silent without it. */
+  function describeUpload(job) {
+    try {
+      execFile('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries',
+        'stream=codec_name,profile,sample_rate,channels,bit_rate:format=duration,bit_rate', '-of', 'default=nw=1', job.paths.input],
+      { timeout: 10_000, windowsHide: true }, (err, stdout) => {
+        if (err || !stdout) return;
+        console.log(`[demucs] 任务 ${job.id.slice(0, 8)} 的声音：${String(stdout).trim().split(/\s+/).join('，')}`);
+      });
+    } catch { /* optional */ }
   }
 
   function timeoutMessage() {
@@ -485,6 +499,7 @@ export function createDemucsService(options = {}) {
         }
         job.status = 'done';
         job.progress = 100;
+        console.log(`[demucs] 任务 ${job.id.slice(0, 8)} 完成，用时 ${Math.round((Date.now() - (job.acceptedAt || Date.now())) / 1000)} 秒`);
         fs.promises.rm(job.paths.input, { force: true }).catch((e) => {
           warn(`删除任务 ${job.id} 的上传文件失败：${e && e.code ? e.code : e}`);
         });
@@ -672,6 +687,9 @@ export function createDemucsService(options = {}) {
         let position = 1;
         for (const other of jobs.values()) if (queue.state(other.id) === 'queued') position++;
         job.status = 'queued';
+        job.acceptedAt = Date.now();
+        console.log(`[demucs] 任务 ${id.slice(0, 8)} 已收到（${job.model}，${(bytes / 1048576).toFixed(1)} MB），排在第 ${position} 位`);
+        describeUpload(job);
         sendJson(res, 202, { id, status: 'queued', position });
         queue.enqueue(id); // pumps; runJob may start this job right away
       });
