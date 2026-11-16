@@ -13,6 +13,7 @@ import {
 } from './export-client.js';
 import { canBrowserVisRecord, createVisCompositor } from './vis-record.js';
 import { encodeVisPayload, shiftBeat, VIS_VERSION } from './vis-data.js';
+import { extractAacAudio } from './mp4-audio.js';
 import { openStore, newKey, keysToPrune, STORED_FILE_LIMIT, STORED_STEM_LIMITS } from './store.js';
 import { createLiveVisualizer, readVisSettings } from './visualizer.js';
 import { computeVisData } from './vis-compute.js';
@@ -531,6 +532,8 @@ function kindOf(file) {
   return /\.(mp4|m4v|mov|webm|mkv|3gp)$/i.test(file.name) ? 'video' : 'audio';
 }
 
+const DECODE_FAILED = '这个文件的音轨没法在浏览器里解码，原曲可以正常播放；想分离音轨请换成 MP4 / MP3 / WAV / M4A。';
+
 function decodeAudio(arrayBuffer) {
   const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const ctx = new Offline(2, 44100, 44100);
@@ -538,6 +541,49 @@ function decodeAudio(arrayBuffer) {
     const p = ctx.decodeAudioData(arrayBuffer, resolve, reject);
     if (p && p.then) p.then(resolve, reject);
   });
+}
+
+/** The buffer without its first `seconds` (the encoder's lead-in that players skip). */
+function trimStart(buffer, seconds) {
+  const skip = Math.round((seconds || 0) * buffer.sampleRate);
+  if (!(skip > 0) || skip >= buffer.length) return buffer;
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const out = new Offline(buffer.numberOfChannels, buffer.length - skip, buffer.sampleRate)
+    .createBuffer(buffer.numberOfChannels, buffer.length - skip, buffer.sampleRate);
+  for (let c = 0; c < buffer.numberOfChannels; c++) out.getChannelData(c).set(buffer.getChannelData(c).subarray(skip));
+  return out;
+}
+
+const SOUND_ONLY_ABOVE = 200 * 1024 * 1024;
+
+/**
+ * Decodes a file's sound. Two ways: hand the whole file to the browser, or
+ * (MOV / MP4 with AAC sound) read only the sound track out of the container
+ * (mp4-audio.js). Phone recordings (.mov), phones and large videos try the
+ * sound track first: Safari does not decode every .mov, and a phone tab can
+ * run out of memory reading a whole video. Whichever is tried first, the
+ * other is the fallback. Resolves to null when `stillCurrent` turned false.
+ */
+async function decodeFileAudio(file, { mobile, signal, stillCurrent }) {
+  const soundTrack = async () => {
+    const found = await extractAacAudio(file, { signal });
+    if (!found) return null;
+    return trimStart(await decodeAudio(found.data.buffer), found.trimSec);
+  };
+  const wholeFile = async () => decodeAudio(await file.arrayBuffer());
+  const quicktime = /quicktime/i.test(file.type || '') || /.(mov|qt)$/i.test(file.name || '');
+  const ways = mobile || quicktime || file.size > SOUND_ONLY_ABOVE ? [soundTrack, wholeFile] : [wholeFile, soundTrack];
+  for (const way of ways) {
+    if (!stillCurrent()) return null;
+    try {
+      const buffer = await way();
+      if (buffer && buffer.length) return buffer;
+    } catch {
+      // try the other way
+    }
+  }
+  if (!stillCurrent()) return null;
+  throw new Error(DECODE_FAILED);
 }
 
 // Phones get tighter memory limits for separation (see separationLimitMessage).
@@ -669,7 +715,6 @@ function revokeUrls(urls) {
   for (const u of Object.values(urls || {})) URL.revokeObjectURL(u);
 }
 
-const DECODE_FAILED = '这个文件的音轨没法在浏览器里解码，原曲可以正常播放；想分离音轨请换成 MP4 / MP3 / WAV / M4A。';
 
 /**
  * Separates `entry` with Demucs when the local server has it, otherwise (or
@@ -686,15 +731,8 @@ async function separateEntry(entry, { signal, stillCurrent, mobile, metaDuration
   };
 
   const runDsp = async () => {
-    const buf = await entry.file.arrayBuffer();
-    if (!stillCurrent()) return null;
-    let audioBuffer;
-    try {
-      audioBuffer = await decodeAudio(buf);
-    } catch {
-      throw new Error(DECODE_FAILED);
-    }
-    if (!stillCurrent()) return null;
+    const audioBuffer = await decodeFileAudio(entry.file, { mobile, signal, stillCurrent });
+    if (!audioBuffer || !stillCurrent()) return null;
     entry.duration = audioBuffer.duration;
     saveFilePatch(entry, { duration: entry.duration });
     state.analysis = {
