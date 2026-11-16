@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createDemucsService, readConfig, defaultTempRoot } from './demucs-service.js';
-import { createAccess, readPassword } from './access.js';
+import { createAccess, readPassword, isLocalRequest } from './access.js';
 import { createExportService, readExportConfig, defaultExportTempRoot } from './export-service.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
@@ -50,8 +50,20 @@ export function resolvePath(rawUrl, root = ROOT) {
   return { file };
 }
 
-export function createServer(root = ROOT, { demucs, exporter, access } = {}) {
+export function createServer(root = ROOT, { demucs, exporter, access, requestLog } = {}) {
   return http.createServer((req, res) => {
+    // One line per API request and page load, for finding out why a visitor's separation went wrong.
+    if (requestLog) {
+      const pathname = String(req.url || '/').split('?')[0];
+      if (pathname === '/' || pathname.startsWith('/api/')) {
+        const started = Date.now();
+        res.on('finish', () => requestLog({
+          method: req.method, url: req.url, status: res.statusCode, ms: Date.now() - started,
+          remote: !isLocalRequest(req), bytes: Number(req.headers['content-length']) || 0,
+          agent: String(req.headers['user-agent'] || '').slice(0, 120),
+        }));
+      }
+    }
     // With an access password set, everything except this computer's own browser needs the login cookie.
     if (access && access.handle(req, res)) return;
     // Demucs_Service only claims /api/separate and Export_Service only /api/export;
@@ -76,7 +88,9 @@ export function createServer(root = ROOT, { demucs, exporter, access } = {}) {
       res.writeHead(200, {
         'Content-Type': type,
         'Content-Length': stat.size,
-        'Cache-Control': 'no-cache',
+        // no-store, not no-cache: phones (and a tunnel's cache in between) kept running an
+        // old script after the file changed. The files are small and local, so always resend.
+        'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
       });
       if (req.method === 'HEAD') {
@@ -106,7 +120,25 @@ if (isMain) {
   const demucs = createDemucsService({ ...readConfig(), tempRoot: defaultTempRoot() });
   const exporter = createExportService({ ...readExportConfig(), tempRoot: defaultExportTempRoot() });
   const access = createAccess({ password: readPassword() });
-  createServer(ROOT, { demucs, exporter, access }).listen(port, host, () => {
+  // Request log: a small text file in the temp folder, started afresh on every launch.
+  const logFile = path.join(os.tmpdir(), 'chaipai-requests.log');
+  try { fs.writeFileSync(logFile, ''); } catch { /* logging is optional */ }
+  // Lines the services print about jobs go to the same file.
+  for (const name of ['log', 'error', 'warn']) {
+    const original = console[name].bind(console);
+    console[name] = (...args) => {
+      original(...args);
+      const text = args.join(' ');
+      if (text.startsWith('[')) fs.appendFile(logFile, `${new Date().toISOString()} ${text}
+`, () => {});
+    };
+  }
+  const requestLog = (r) => {
+    const line = `${new Date().toISOString()} ${r.remote ? 'remote' : 'local '} ${r.method} ${r.url} -> ${r.status} ${r.ms}ms ${r.bytes}B ${r.agent}
+`;
+    fs.appendFile(logFile, line, () => {});
+  };
+  createServer(ROOT, { demucs, exporter, access, requestLog }).listen(port, host, () => {
     console.log('拆拍 · 音乐练习 已启动');
     console.log(`  电脑访问:  http://localhost:${port}`);
     for (const ip of lanAddresses()) console.log(`  手机访问:  http://${ip}:${port}  (同一 Wi-Fi 下)`);

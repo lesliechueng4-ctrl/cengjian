@@ -119,7 +119,9 @@ function loadSettings() {
       speed: SPEEDS.includes(s && s.speed) ? s.speed : 1,
       loop: !!(s && s.loop),
       mirror: !!(s && s.mirror),
-      demucsModel: sanitizeDemucsModel(s && s.demucsModel),
+      // A model saved before htdemucs_ft became the default was never a deliberate pick.
+      demucsModel: s && s.modelPicked ? sanitizeDemucsModel(s.demucsModel) : DEFAULT_DEMUCS_MODEL,
+      modelPicked: !!(s && s.modelPicked),
       ...readVisSettings(s), // visVideo / visAudio (6.6, 6.8)
     };
   } catch {
@@ -145,9 +147,18 @@ if (els.demucsModel) {
   els.demucsModel.addEventListener('change', () => {
     // A running separation keeps its model; the next openEntry reads this value.
     settings.demucsModel = sanitizeDemucsModel(els.demucsModel.value);
+    settings.modelPicked = true;
     els.demucsModel.value = settings.demucsModel;
     saveSettings();
   });
+}
+
+/** Which separation produced the current stems, for the ready line. */
+function engineLabel() {
+  const engine = state.analysis && state.analysis.engine;
+  if (engine === 'demucs') return '（AI 分离）';
+  if (engine === 'dsp') return '（浏览器简易分离，效果有限）';
+  return '';
 }
 
 /** Shows the "no Demucs" hint unless the last status check said it is available. */
@@ -156,8 +167,12 @@ function renderDemucsHint() {
   els.demucsHint.hidden = !!(state.demucs && state.demucs.available);
 }
 // The hint starts hidden in the HTML and is revealed once the check answers.
+// True once a 拆拍 server answered the status check on this page. A static
+// copy of the page (the online version) has no server and never sets it.
+let serverSeen = false;
 fetchDemucsStatus().then((status) => {
   state.demucs = status;
+  if (status) serverSeen = true;
   renderDemucsHint();
 });
 
@@ -482,7 +497,7 @@ function renderStems() {
   else if (state.separating) {
     const busy = state.progressText || `正在分离音轨… ${Math.floor(state.progress * 100)}%`;
     text = `${busy}（可以先播放原曲）${notice}`;
-  } else if (state.stemsReady) text = `音轨已就绪，点一下切换${notice}`;
+  } else if (state.stemsReady) text = `音轨已就绪${engineLabel()}，点一下切换${notice}`;
   else text = state.notice;
   els.stemStatus.textContent = text;
   els.stemStatus.classList.toggle('busy', state.separating);
@@ -586,8 +601,23 @@ async function decodeFileAudio(file, { mobile, signal, stillCurrent }) {
   throw new Error(DECODE_FAILED);
 }
 
+/**
+ * The server's status. From another device the answer travels through the
+ * internet, so it gets more time and a few tries before it counts as unreachable.
+ */
+async function remoteStatus(signal) {
+  if (onThisComputer()) return fetchDemucsStatus({ signal });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const status = await fetchDemucsStatus({ signal, timeoutMs: 10000 });
+    if (status && !status.checking) return status;
+    if ((signal && signal.aborted) || (!status && !serverSeen)) return status;
+    await new Promise((r) => setTimeout(r, status ? 3000 : 800));
+  }
+  return fetchDemucsStatus({ signal, timeoutMs: 10000 });
+}
+
 const SOUND_UPLOAD_ABOVE = 90 * 1024 * 1024;
-const onThisComputer = () => /^(localhost|127.0.0.1|[::1])$/.test(location.hostname);
+const onThisComputer = () => typeof location === 'undefined' || !location.hostname || /^(localhost|127.0.0.1|[::1])$/.test(location.hostname);
 
 /**
  * For AI separation of a video: its sound track alone as a small .aac file,
@@ -682,7 +712,7 @@ async function restoreStems(entry) {
     if (!ids.length || !rec.analysis) { entry.hasStems = false; return; }
     const urls = {};
     for (const id of ids) urls[id] = URL.createObjectURL(rec.blobs[id]);
-    entry.cache = { urls, analysis: rec.analysis };
+    entry.cache = { urls, analysis: rec.analysis, restored: true };
     if (rec.vis && rec.vis.version === VIS_VERSION && rec.vis.stems) entry.cache.vis = rec.vis;
   } catch (err) {
     warnSave(err);
@@ -767,13 +797,19 @@ async function separateEntry(entry, { signal, stillCurrent, mobile, metaDuration
     return { urls, analysis: { ...state.analysis, bpm, engine: 'dsp', qualityMode: mode } };
   };
 
+  let lastStatus = null;
+  let demucsFailure = '';
+  // Reached through a shared address (not this computer's own browser) and a
+  // 拆拍 server is behind the page, unless that server said it has no Demucs.
+  const remoteOnly = () => !onThisComputer() && serverSeen && !(lastStatus && !lastStatus.available && !lastStatus.checking);
   const out = await separateWithFallback({
     stillCurrent,
     fetchStatus: async () => {
-      const status = await fetchDemucsStatus({ signal });
-      state.demucs = status;
+      lastStatus = await remoteStatus(signal);
+      state.demucs = lastStatus;
+      if (lastStatus) serverSeen = true;
       renderDemucsHint();
-      return status;
+      return lastStatus;
     },
     runDemucs: async () => {
       const sound = await soundOnlyUpload(entry, signal);
@@ -794,12 +830,23 @@ async function separateEntry(entry, { signal, stillCurrent, mobile, metaDuration
       });
     },
     onNotice: (text) => {
-      state.notice = text;
+      demucsFailure = text;
+      state.notice = remoteOnly() ? '' : text;
       state.progressText = '';
       state.progress = 0;
       renderStems();
     },
-    runDsp,
+    runDsp: () => {
+      // Someone using another person's computer through a shared address came
+      // for its AI separation: say what went wrong instead of quietly giving
+      // them the much weaker in-browser result.
+      if (remoteOnly()) {
+        if (demucsFailure) throw new Error(demucsFailure.replace(/，已改用浏览器分离。$/, '。请重新上传再试一次。'));
+        if (!lastStatus) throw new Error('连不上分离用的电脑（网络不稳定或对方的拆拍没开）。原曲可以正常播放，请稍后重新上传再试。');
+        if (lastStatus.checking) throw new Error('分离用的电脑刚启动，还在准备。请过半分钟重新上传再试。');
+      }
+      return runDsp();
+    },
   });
   if (!out || !out.result) return null;
   if (out.engine === 'dsp') return out.result;
@@ -845,6 +892,21 @@ async function openEntry(entry) {
   if (!entry.cache && entry.hasStems) {
     await restoreStems(entry);
     if (token !== openToken) return;
+  }
+  // Stems saved on an earlier visit by the weaker in-browser separation are not reused once AI
+  // separation is on offer: the file is separated again (once per visit, so a
+  // file the AI cannot handle does not retry on every open).
+  if (entry.cache && entry.cache.restored && entry.cache.analysis && entry.cache.analysis.engine === 'dsp' && !entry.aiRetried) {
+    const status = state.demucs || await fetchDemucsStatus({ timeoutMs: onThisComputer() ? 3000 : 10000 });
+    if (token !== openToken) return;
+    if (status && status.available) {
+      entry.aiRetried = true;
+      if (state.current !== entry) {
+        revokeUrls(entry.cache.urls);
+        entry.cache = null;
+        entry.hasStems = false;
+      }
+    }
   }
   if (state.abort) state.abort.abort();
   stopVisCompute(); // the previous file's Vis_Data computation (2.3)

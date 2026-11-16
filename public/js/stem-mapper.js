@@ -25,8 +25,7 @@ const COMMON_SOURCES = {
 };
 
 /** Per model: which Demucs outputs or DSP step produced each Derived_Stem. */
-export const STEM_SOURCES = {
-  htdemucs: {
+const FOUR_STEM_SOURCES = {
     vocal: COMMON_SOURCES.vocal,
     inst: 'Demucs drums + bass + other 相加',
     drums: COMMON_SOURCES.drums,
@@ -35,7 +34,12 @@ export const STEM_SOURCES = {
     perc: COMMON_SOURCES.perc,
     fx: COMMON_SOURCES.fx,
     other: COMMON_SOURCES.other,
-  },
+};
+
+/** Per model: which Demucs outputs or DSP step produced each Derived_Stem. */
+export const STEM_SOURCES = {
+  htdemucs_ft: FOUR_STEM_SOURCES, // fine-tuned htdemucs: same four outputs, cleaner, about 4x slower
+  htdemucs: FOUR_STEM_SOURCES,
   htdemucs_6s: {
     vocal: COMMON_SOURCES.vocal,
     inst: 'Demucs drums + bass + other + guitar + piano 相加',
@@ -91,7 +95,7 @@ function addInto(acc, x) {
  * it is known.
  *
  * @param {object} p
- * @param {'htdemucs'|'htdemucs_6s'} p.model
+ * @param {'htdemucs_ft'|'htdemucs'|'htdemucs_6s'} p.model
  * @param {(name:string) => Promise<{channels: Float32Array[], sampleRate: number}>} p.load
  * @param {(id:string, channels: Float32Array[]) => (Promise<any>|any)} p.emit
  * @returns {Promise<{bpm:number, sampleRate:number, mono:boolean, duration:number}>}
