@@ -30,7 +30,7 @@ test('buildPackage: app files, bundled node.exe, launcher and readme; test lefto
     const root = path.join(tmp, 'repo');
     fs.mkdirSync(path.join(root, 'public', 'js'), { recursive: true });
     fs.mkdirSync(path.join(root, 'public', '.scratch'), { recursive: true });
-    for (const f of ['server.js', 'server-util.js', 'demucs-service.js', 'export-service.js', 'LICENSE', 'README.md']) fs.writeFileSync(path.join(root, f), f);
+    for (const f of [...APP_FILES.filter((x) => x !== 'public' && x !== 'package.json'), 'README.md']) fs.writeFileSync(path.join(root, f), f);
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'chaipai', version: '1.2.3' }));
     fs.writeFileSync(path.join(root, 'public', 'index.html'), '<title>x</title>');
     fs.writeFileSync(path.join(root, 'public', 'js', 'app.js'), '//');

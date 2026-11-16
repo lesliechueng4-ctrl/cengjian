@@ -586,6 +586,23 @@ async function decodeFileAudio(file, { mobile, signal, stillCurrent }) {
   throw new Error(DECODE_FAILED);
 }
 
+const SOUND_UPLOAD_ABOVE = 90 * 1024 * 1024;
+const onThisComputer = () => /^(localhost|127.0.0.1|[::1])$/.test(location.hostname);
+
+/**
+ * For AI separation of a video: its sound track alone as a small .aac file,
+ * so the upload is a few MB instead of the whole video. Used when the server
+ * is another computer (uploads are slow, and tunnels cap their size) or the
+ * video is large. Null means upload the file as it is.
+ */
+async function soundOnlyUpload(entry, signal) {
+  if (entry.kind !== 'video') return null;
+  if (onThisComputer() && entry.file.size <= SOUND_UPLOAD_ABOVE) return null;
+  const found = await extractAacAudio(entry.file, { signal });
+  if (!found) return null;
+  return { file: new File([found.data], 'sound.aac', { type: 'audio/aac' }), trimSec: found.trimSec };
+}
+
 // Phones get tighter memory limits for separation (see separationLimitMessage).
 const isMobile = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
@@ -758,17 +775,24 @@ async function separateEntry(entry, { signal, stillCurrent, mobile, metaDuration
       renderDemucsHint();
       return status;
     },
-    runDemucs: () => runDemucsSeparation(entry.file, {
+    runDemucs: async () => {
+      const sound = await soundOnlyUpload(entry, signal);
+      // The bare sound track still has the encoder's lead-in that players skip; drop it from every stem.
+      const encode = sound && sound.trimSec > 0
+        ? (chs, rate) => { const skip = Math.round(sound.trimSec * rate); return encodeWav(chs.map((c) => (skip < c.length ? c.subarray(skip) : c)), rate); }
+        : encodeWav;
+      return runDemucsSeparation(sound ? sound.file : entry.file, {
       model: settings.demucsModel,
       signal,
-      encode: encodeWav,
+      encode,
       onPhase: (ph) => {
         if (!stillCurrent()) return;
         state.progressText = remoteProgressText(ph);
         renderStems();
       },
       onProgress,
-    }),
+      });
+    },
     onNotice: (text) => {
       state.notice = text;
       state.progressText = '';
