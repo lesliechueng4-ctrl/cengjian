@@ -17,7 +17,7 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 export const PACKAGE_DIR = 'chaipai-win-x64';
 /** What goes into the package's app/ folder, relative to the repository root. */
-export const APP_FILES = ['server.js', 'server-util.js', 'demucs-service.js', 'export-service.js', 'package.json', 'LICENSE', 'public'];
+export const APP_FILES = ['server.js', 'access.js', 'server-util.js', 'demucs-service.js', 'export-service.js', 'package.json', 'LICENSE', 'public'];
 
 const CRLF = (lines) => lines.join('\r\n') + '\r\n';
 

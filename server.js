@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createDemucsService, readConfig, defaultTempRoot } from './demucs-service.js';
+import { createAccess, readPassword } from './access.js';
 import { createExportService, readExportConfig, defaultExportTempRoot } from './export-service.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
@@ -49,8 +50,10 @@ export function resolvePath(rawUrl, root = ROOT) {
   return { file };
 }
 
-export function createServer(root = ROOT, { demucs, exporter } = {}) {
+export function createServer(root = ROOT, { demucs, exporter, access } = {}) {
   return http.createServer((req, res) => {
+    // With an access password set, everything except this computer's own browser needs the login cookie.
+    if (access && access.handle(req, res)) return;
     // Demucs_Service only claims /api/separate and Export_Service only /api/export;
     // everything else is static.
     if (demucs && demucs.handle(req, res)) return;
@@ -102,10 +105,14 @@ if (isMain) {
   const host = process.env.HOST || '0.0.0.0';
   const demucs = createDemucsService({ ...readConfig(), tempRoot: defaultTempRoot() });
   const exporter = createExportService({ ...readExportConfig(), tempRoot: defaultExportTempRoot() });
-  createServer(ROOT, { demucs, exporter }).listen(port, host, () => {
+  const access = createAccess({ password: readPassword() });
+  createServer(ROOT, { demucs, exporter, access }).listen(port, host, () => {
     console.log('拆拍 · 音乐练习 已启动');
     console.log(`  电脑访问:  http://localhost:${port}`);
     for (const ip of lanAddresses()) console.log(`  手机访问:  http://${ip}:${port}  (同一 Wi-Fi 下)`);
+    console.log(access.enabled
+      ? '  访问密码:  已开启（这台电脑上用 localhost 打开不需要密码，其他设备需要）'
+      : '  访问密码:  未设置（只适合在自己家里的 Wi-Fi 下用；要分享到外网请先设置，见 README）');
     // Clears the temp dir and probes Demucs; prints one "AI 分离" line after the banner.
     demucs.init();
     // Clears the cengjian-export temp dir and probes FFmpeg; prints one "视频导出" line.
